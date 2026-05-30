@@ -32,6 +32,19 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 
 ---
 
+## Supported Models
+
+The app includes built-in presets for several highly-capable, lightweight models optimized for mobile execution. Below are their approximate download sizes and memory requirements:
+
+| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement |
+| :--- | :--- | :--- | :--- | :--- |
+| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.6 GB | 6 GB+ |
+| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.6 GB | 6 GB+ |
+| **Gemma 1.1 2B IT** | Google | 2B | ~1.4 GB | 8 GB+ |
+| **Phi-2 2.7B** | Microsoft | 2.7B | ~1.6 GB | 8 GB+ |
+
+---
+
 ## Features
 
 | Inference | Model Manager |
