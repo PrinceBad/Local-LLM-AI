@@ -2,7 +2,7 @@
 
 # Local LLM/AI
 
-### A premium, high-performance offline Android client for running Large Language Models (LLMs) on-device.
+### A premium, high-performance offline Android client for running Large Language Models (LLMs) on-device with multimodal OCR and NPU acceleration.
 
 <br/>
 
@@ -26,9 +26,13 @@ Additionally, this application executes all calculations offline. No internet co
 
 ## What Is Local LLM/AI?
 
-Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Qwen 2.5, DeepSeek-R1, Phi-2, and Gemma 2B) natively on mobile hardware, leveraging GPU acceleration (Vulkan) for responsive streaming generation.
+Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Qwen 2.5, DeepSeek-R1, Phi-2, and Gemma 2B) natively on mobile hardware. 
 
-The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface with dynamic theme styling and background download handling.
+The app includes dynamic backend routing depending on the build flavor:
+- **Normal Flavor**: Targets GPU acceleration (Vulkan) for responsive streaming generation with graceful CPU fallback.
+- **NPU Flavor**: Configured to delegate inference directly to the device's system NPU/AI chip via NNAPI.
+
+The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface featuring offline OCR document parsing, video/file media integration, and background download handling.
 
 ---
 
@@ -47,19 +51,19 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 ## Features
 
-| Inference | Model Manager |
+| Inference | Multimodal & OCR (100% Offline) |
 | --- | --- |
-| High-performance offline LLM execution | Integrated direct model downloader |
-| GPU hardware acceleration (Vulkan) | Presets for Qwen 2.5, DeepSeek-R1, Phi-2 & Gemma |
-| Graceful CPU fallback optimization | Support for custom model `.task` URLs |
-| Streaming word-by-word responses | Secure local file-system sandbox |
+| High-performance offline LLM execution | Attach Images, Videos & Documents (PDF, Code, Text) |
+| Dual-flavor release (`normal` Vulkan GPU & `npu` routing) | Offline image OCR text extraction using Google ML Kit |
+| Graceful CPU fallback optimization | Offline page-by-page PDF rendering and text recognition |
+| Streaming word-by-word responses | Playback attached videos natively and view documents via Intent |
 
 | UI / Experience | Core Features |
 | --- | --- |
-| Premium Material 3 dynamic styling | Complete offline privacy |
-| Custom system instructions prompt | Direct file parsing |
-| Smooth, fluid animations | Quantized weights optimizations |
-| Copy to clipboard & message actions | Multi-thread worker dispatcher |
+| Premium Material 3 dynamic styling | Complete offline privacy (no logs or tracking) |
+| Custom system instructions prompt | Large model memory size & RAM badges in-app |
+| Interactive file attachments preview drawer | Multi-turn chat context memory (6-turn history) |
+| Collapsible OCR logs under bubble cards | Quantized weights optimizations |
 
 ---
 
@@ -77,15 +81,28 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 ## Download
 
-Grab the latest APK from the [GitHub releases page](releases/latest). Use a release build for normal installs; debug builds are only for local testing.
+Grab the latest compiled APKs from the [GitHub releases page](releases/latest).
+
+We compile two separate releases for each update:
+1. **Normal Release (`app-normal-release-unsigned.apk`)**: Optimized for general devices using mobile GPU (Vulkan) or CPU.
+2. **NPU Release (`app-npu-release-unsigned.apk`)**: Designed for modern phones featuring specialized AI chips (NPU), utilizing neural network API routing (`LlmInference.Backend.DEFAULT`). Includes the `.npu` application suffix so you can install both releases side-by-side.
 
 ---
 
 ## Build
 
-```bash
-$env:JAVA_HOME = "C:\Users\Badsiwal\.antigravity-ide\extensions\redhat.java-1.54.0-win32-x64\jre\21.0.10-win32-x86_64"
-./gradlew assembleDebug
+To compile the application yourself, ensure you have Java 17 and Android SDK set up. Set your JDK path and run the compilation:
+
+### Build Normal Flavor
+```powershell
+$env:JAVA_HOME = "C:\Users\Badsiwal\.gradle\jdks\eclipse_adoptium-17-amd64-windows.2"
+./gradlew assembleNormalRelease
+```
+
+### Build NPU Flavor
+```powershell
+$env:JAVA_HOME = "C:\Users\Badsiwal\.gradle\jdks\eclipse_adoptium-17-amd64-windows.2"
+./gradlew assembleNpuRelease
 ```
 
 ---
@@ -97,7 +114,9 @@ Local LLM/AI is built on top of state-of-the-art on-device intelligence librarie
 Special thanks to:
 
 - [Google MediaPipe Tasks GenAI](https://github.com/google-ai-edge/mediapipe)
+- [Google ML Kit Text Recognition](https://developers.google.com/ml-kit/vision/text-recognition)
 - [Jetpack Compose & Material 3](https://developer.android.com/compose)
+- [Coil Image Loading Library](https://github.com/coil-kt/coil)
 - [OkHttp](https://github.com/square/okhttp)
 - [Kotlin Coroutines Flow](https://github.com/Kotlin/kotlinx.coroutines)
 
