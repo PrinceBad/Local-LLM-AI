@@ -18,7 +18,7 @@
 
 > [!WARNING]
 > Local LLM/AI executes AI models entirely on your physical mobile device. Running large models is highly resource-intensive and requires a modern processor and sufficient RAM (6 GB+). System stability, inference speeds, and output quality depend entirely on your hardware capability.
-> Model weights (such as Gemma 2B) are not packaged inside the APK and must be downloaded or transferred manually due to their size (1.5 GB+).
+> Model weights (such as Qwen, DeepSeek, or Gemma) are not packaged inside the APK and must be downloaded or transferred manually due to their size (1.5 GB+).
 
 Additionally, this application executes all calculations offline. No internet connection is required after models are downloaded, and no conversational data ever leaves your device.
 
@@ -26,7 +26,7 @@ Additionally, this application executes all calculations offline. No internet co
 
 ## What Is Local LLM/AI?
 
-Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Gemma 2B or others) natively on mobile hardware, leveraging GPU acceleration (Vulkan) for responsive streaming generation.
+Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Qwen 2.5, DeepSeek-R1, Phi-2, and Gemma 2B) natively on mobile hardware, leveraging GPU acceleration (Vulkan) for responsive streaming generation.
 
 The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface with dynamic theme styling and background download handling.
 
@@ -37,7 +37,7 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 | Inference | Model Manager |
 | --- | --- |
 | High-performance offline LLM execution | Integrated direct model downloader |
-| GPU hardware acceleration (Vulkan) | Preset catalog for Gemma 2B & others |
+| GPU hardware acceleration (Vulkan) | Presets for Qwen 2.5, DeepSeek-R1, Phi-2 & Gemma |
 | Graceful CPU fallback optimization | Support for custom model `.task` URLs |
 | Streaming word-by-word responses | Secure local file-system sandbox |
 
