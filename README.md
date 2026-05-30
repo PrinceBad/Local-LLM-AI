@@ -119,7 +119,6 @@ Special thanks to:
 - [Coil Image Loading Library](https://github.com/coil-kt/coil)
 - [OkHttp](https://github.com/square/okhttp)
 - [Kotlin Coroutines Flow](https://github.com/Kotlin/kotlinx.coroutines)
-- [off-grid-mobile-ai](https://github.com/alichherawalla/off-grid-mobile-ai) by Ali Chherawalla (Inspiration for NPU routing architecture)
 
 ---
 
