@@ -188,7 +188,7 @@ fun ModelManagerScreen(
                                 OutlinedTextField(
                                     value = customFileName,
                                     onValueChange = { customFileName = it },
-                                    label = { Text("Local Filename (must end in .task)") },
+                                    label = { Text("Local Filename (must end in .task or .bin)") },
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -199,12 +199,12 @@ fun ModelManagerScreen(
 
                                 Button(
                                     onClick = {
-                                        if (customUrl.isNotBlank() && customFileName.endsWith(".task")) {
+                                        if (customUrl.isNotBlank() && (customFileName.endsWith(".task") || customFileName.endsWith(".bin"))) {
                                             viewModel.downloadModelFromUrl(customUrl, customFileName)
                                             customUrl = ""
                                         }
                                     },
-                                    enabled = customUrl.isNotBlank() && customFileName.endsWith(".task") && uiState.currentDownloadingModelId == null,
+                                    enabled = customUrl.isNotBlank() && (customFileName.endsWith(".task") || customFileName.endsWith(".bin")) && uiState.currentDownloadingModelId == null,
                                     modifier = Modifier.fillMaxWidth().height(46.dp),
                                     shape = RoundedCornerShape(23.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)

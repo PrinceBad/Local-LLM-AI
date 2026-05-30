@@ -9,6 +9,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 sealed interface DownloadState {
     data object Idle : DownloadState
@@ -23,17 +24,28 @@ sealed interface DownloadState {
     data class Error(val message: String) : DownloadState
 }
 
-class ModelDownloader(private val client: OkHttpClient = OkHttpClient()) {
+class ModelDownloader(
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+) {
 
     fun downloadModel(url: String, destinationFile: File): Flow<DownloadState> = flow {
         emit(DownloadState.Progress(0, 0, 0, 0.0, 0))
 
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .build()
         
         try {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                emit(DownloadState.Error("Failed to download model: HTTP ${response.code}"))
+                emit(DownloadState.Error("Failed to download model: HTTP "))
                 return@flow
             }
 

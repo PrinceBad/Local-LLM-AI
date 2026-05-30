@@ -1,4 +1,4 @@
-package com.example.auralocalai.ui
+﻿package com.example.auralocalai.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -64,21 +64,39 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     val presets = listOf(
         PresetModel(
+            id = "qwen-1.5b",
+            name = "Qwen 2.5 1.5B Instruct (Alibaba)",
+            description = "Alibaba's state-of-the-art multilingual LLM. Outperforms models of similar size in math, coding, and general knowledge.",
+            sizeLabel = "1.6 GB",
+            ramRequirement = "6 GB+ RAM",
+            downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
+            fileName = "qwen-1.5b.task"
+        ),
+        PresetModel(
+            id = "deepseek-1.5b",
+            name = "DeepSeek-R1 Distill Qwen 1.5B",
+            description = "DeepSeek's powerful reasoning model distilled into Qwen architecture, outputting detailed chain-of-thought logic.",
+            sizeLabel = "1.6 GB",
+            ramRequirement = "6 GB+ RAM",
+            downloadUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task",
+            fileName = "deepseek-r1.task"
+        ),
+        PresetModel(
             id = "gemma-2b",
             name = "Gemma 1.1 2B IT (Google)",
-            description = "Google's ultra-optimized mobile LLM, excellent at chat, summarization, and instruction following.",
+            description = "Google's optimized mobile LLM. Highly responsive and custom-tuned for standard mobile workloads and general Q&A.",
             sizeLabel = "1.4 GB",
             ramRequirement = "8 GB+ RAM",
-            downloadUrl = "https://huggingface.co/lmstudio-community/gemma-2b-it-GGUF/resolve/main/gemma-2b-it-q4_K_M.task",
+            downloadUrl = "https://huggingface.co/metsman/gemma-2b-it-cpu-int4-org/resolve/main/gemma-2b-it-cpu-int4.bin",
             fileName = "gemma-2b-it.task"
         ),
         PresetModel(
             id = "phi-2",
             name = "Phi-2 2.7B (Microsoft)",
-            description = "Microsoft's research model, exceptional reasoning, logic, and coding capacities for its tiny footprint.",
+            description = "Microsoft's lightweight model. Excellent at processing logic, math calculations, and code snippets.",
             sizeLabel = "1.6 GB",
             ramRequirement = "8 GB+ RAM",
-            downloadUrl = "https://huggingface.co/lmstudio-community/phi-2-GGUF/resolve/main/phi-2-q4_K_M.task",
+            downloadUrl = "https://huggingface.co/siddhantchalke/phi2-cpu-mediapipe-llm-inference/resolve/main/phi2_cpu.bin",
             fileName = "phi-2.task"
         )
     )
@@ -111,7 +129,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshDownloadedModels() {
         val files = storageDir.listFiles() ?: emptyArray()
-        val localFiles = files.filter { it.isFile && it.name.endsWith(".task") }.map { it.name }
+        val localFiles = files.filter { it.isFile && (it.name.endsWith(".task") || it.name.endsWith(".bin")) }.map { it.name }
         _uiState.update { it.copy(localModels = localFiles) }
     }
 
@@ -189,7 +207,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
         inferenceJob = viewModelScope.launch {
             val systemPrompt = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. " +
-                    "Keep your responses concise and precise.\n\nUser: $content\nAI: "
+                    "Keep your responses concise and precise.\n\nUser: \nAI: "
             
             val aiMessagePlaceholder = ChatMessage("", isUser = false)
             _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
