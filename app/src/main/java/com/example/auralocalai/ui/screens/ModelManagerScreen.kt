@@ -270,7 +270,7 @@ fun PresetModelCard(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "Size: ",
+                                text = "Size: ${preset.sizeLabel}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF1E40AF)
@@ -285,7 +285,7 @@ fun PresetModelCard(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "RAM: ",
+                                text = "RAM: ${preset.ramRequirement}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF5B21B6)
@@ -379,7 +379,7 @@ fun PresetModelCard(
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                         ) {
                             Text(
-                                text = "Download ()",
+                                text = "Download (${preset.sizeLabel})",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
