@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.theme
+package com.example.auralocalai.theme
 
 import androidx.compose.ui.graphics.Color
 
@@ -15,3 +15,12 @@ val TextGray = Color(0xFF90A4AE)
 
 val DarkError = Color(0xFFFF5252)
 val DarkSuccess = Color(0xFF00E676)
+val LightBackground = Color(0xFFF8FAFC)
+val LightSurface = Color(0xFFFFFFFF)
+val LightSurfaceVariant = Color(0xFFF1F5F9)
+val LightPrimary = Color(0xFF2563EB)
+val LightSecondary = Color(0xFF4F46E5)
+val LightTertiary = Color(0xFF0D9488)
+val LightOnBackground = Color(0xFF0F172A)
+val LightOnSurface = Color(0xFF0F172A)
+val LightOnSurfaceVariant = Color(0xFF475569)
