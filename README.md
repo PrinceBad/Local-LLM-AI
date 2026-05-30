@@ -1,71 +1,101 @@
-# Local LLM/AI 🤖📱
+<div align="center">
 
-A premium, modern, and high-performance offline Android application for running Large Language Models (LLMs) entirely on-device. Powered by **Google MediaPipe Tasks GenAI** and built using modern **Jetpack Compose (Material 3)**.
+# Local LLM/AI
 
-No internet required. No data leaves your device. Total privacy, absolute speed.
+### A premium, high-performance offline Android client for running Large Language Models (LLMs) on-device.
 
----
+<br/>
 
-## ✨ Features
+[![Latest release](https://img.shields.io/badge/releases-GitHub-181717?style=for-the-badge&logo=github&labelColor=0d1117)](releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=0d1117)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/PrinceBad/Local-LLM-AI/total?style=for-the-badge&labelColor=0d1117)](releases)
+[![Android](https://img.shields.io/badge/platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white&labelColor=0d1117)](#download)
+<br/>
 
-- **On-Device Local Inference**: Runs models natively on your mobile hardware. Fully offline, ensuring 100% privacy and zero latency from network roundtrips.
-- **Hardware Acceleration**: Automatically leverages mobile GPU backends (Vulkan) for fast token generation, falling back gracefully to optimized CPU execution.
-- **Model Manager**: Integrated download manager to pull pre-configured LLM models (like Gemma 2B) directly from URLs or load custom local `.task` files.
-- **Premium Material 3 UI**: Clean, stunning interface featuring dynamic theme color harmonization, fluid animations, structured card views, and clean chat bubbles.
-- **Streaming Responses**: Real-time word-by-word token streaming for interactive and responsive conversational experiences.
+[**Download**](#download) - [**Features**](#features) - [**Screenshots**](#screenshots) - [**Credits**](#credits) - [**Disclaimer**](#disclaimer)
 
----
+</div>
 
-## 🚀 Hardware & Software Requirements
+> [!WARNING]
+> Local LLM/AI executes AI models entirely on your physical mobile device. Running large models is highly resource-intensive and requires a modern processor and sufficient RAM (6 GB+). System stability, inference speeds, and output quality depend entirely on your hardware capability.
+> Model weights (such as Gemma 2B) are not packaged inside the APK and must be downloaded or transferred manually due to their size (1.5 GB+).
 
-- **Processor**: High-end ARM64 processor (e.g., Snapdragon 8 Gen 1+, Google Tensor G2+, Dimensity 9000+).
-- **RAM**: Minimum 6 GB of physical system memory (8 GB+ highly recommended to prevent out-of-memory states).
-- **OS Version**: Android 8.0 (API level 26) or higher.
-- **Graphics**: Vulkan-compatible GPU driver for accelerated hardware performance.
-
----
-
-## 🛠️ Getting Started & Installation
-
-### 1. Download the App
-Simply go to the [Releases](https://github.com/PrinceBad/Local-LLM-AI/releases) section of this repository and download the latest `app-debug.apk` file. Install it on your compatible Android device.
-
-### 2. Add an LLM Model
-Because LLM model files are large (1.5 GB+), they are not packaged inside the APK.
-1. Open the **Local LLM Manager** in the app.
-2. Select one of the pre-configured models (e.g., Gemma 2B).
-3. Tap **Download** to stream it directly to your device's local storage.
-4. Once completed, select it as the active model and start chatting!
+Additionally, this application executes all calculations offline. No internet connection is required after models are downloaded, and no conversational data ever leaves your device.
 
 ---
 
-## 📦 Project Structure & Architecture
+## What Is Local LLM/AI?
 
+Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Gemma 2B or others) natively on mobile hardware, leveraging GPU acceleration (Vulkan) for responsive streaming generation.
+
+The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface with dynamic theme styling and background download handling.
+
+---
+
+## Features
+
+| Inference | Model Manager |
+| --- | --- |
+| High-performance offline LLM execution | Integrated direct model downloader |
+| GPU hardware acceleration (Vulkan) | Preset catalog for Gemma 2B & others |
+| Graceful CPU fallback optimization | Support for custom model `.task` URLs |
+| Streaming word-by-word responses | Secure local file-system sandbox |
+
+| UI / Experience | Core Features |
+| --- | --- |
+| Premium Material 3 dynamic styling | Complete offline privacy |
+| Custom system instructions prompt | Direct file parsing |
+| Smooth, fluid animations | Quantized weights optimizations |
+| Copy to clipboard & message actions | Multi-thread worker dispatcher |
+
+---
+
+## Screenshots
+
+<div align="center">
+
+<img src="images/screenshot.png" alt="Chat and Manager Screen" width="40%" />
+
+</div>
+
+---
+
+## Download
+
+Grab the latest APK from the [GitHub releases page](releases/latest). Use a release build for normal installs; debug builds are only for local testing.
+
+---
+
+## Build
+
+```bash
+$env:JAVA_HOME = "C:\Users\Badsiwal\.antigravity-ide\extensions\redhat.java-1.54.0-win32-x64\jre\21.0.10-win32-x86_64"
+./gradlew assembleDebug
 ```
-Local-LLM-AI/
-├── app/
-│   ├── src/main/
-│   │   ├── java/com/example/auralocalai/
-│   │   │   ├── data/            # Local LLM Inference Engine & Download Managers
-│   │   │   ├── ui/              # Compose ViewModels & Core Theme Configurations
-│   │   │   │   └── screens/     # Chat and Model Management Screens
-│   │   │   └── MainActivity.kt  # Root Launcher Activity
-│   │   └── AndroidManifest.xml  # Permissions, Themes, and App Configurations
-│   └── build.gradle.kts         # Core App Dependencies (MediaPipe, Compose, OkHttp)
-├── gradle/                      # Gradle Wrapper & Version Catalogs
-└── build.gradle.kts             # Root Build Configuration
-```
 
 ---
 
-## 💡 Technical Implementation Details
+## Credits
 
-- **MediaPipe Tasks GenAI**: Leverages `LlmInference` with optimized native JNI binaries to run quantized models on mobile chips.
-- **Jetpack Compose & Material 3**: Crafted with high-fidelity components, including `AnimatedVisibility`, HSL color palettes, custom rounded boundaries, and scroll-to-bottom list synchronizations.
-- **Async Streaming Flow**: Utilizes Kotlin Coroutines `callbackFlow` and `flowOn(Dispatchers.IO)` to stream output tokens safely off the main UI thread.
+Local LLM/AI is built on top of state-of-the-art on-device intelligence libraries and modern Android components.
+
+Special thanks to:
+
+- [Google MediaPipe Tasks GenAI](https://github.com/google-ai-edge/mediapipe)
+- [Jetpack Compose & Material 3](https://developer.android.com/compose)
+- [OkHttp](https://github.com/square/okhttp)
+- [Kotlin Coroutines Flow](https://github.com/Kotlin/kotlinx.coroutines)
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Local LLM/AI is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## Disclaimer
+
+Local LLM/AI is an independent, unofficial project. It is not affiliated with, funded, authorized, endorsed by, or associated with Google LLC, MediaPipe, Gemma, or any of their affiliates.
+
+All trademarks, service marks, catalogs, artwork, metadata, and model weights remain the property of their respective owners. Users are responsible for procuring and loading model files in compliance with the respective model's terms of use, license agreements, and regional requirements.
