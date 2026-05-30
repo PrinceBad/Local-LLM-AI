@@ -54,9 +54,9 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 
 <div align="center">
 
-<img src="images/screenshot_main.png" alt="Local LLM/AI Chat Screen" width="45%" />
+<img src="images/screenshot_main.jpg" alt="Local LLM/AI Chat Screen" width="45%" />
 &nbsp;&nbsp;&nbsp;&nbsp;
-<img src="images/screenshot_manager.png" alt="Local LLM Manager Screen" width="45%" />
+<img src="images/screenshot_manager.jpg" alt="Local LLM Manager Screen" width="45%" />
 
 </div>
 
