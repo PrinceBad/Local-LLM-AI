@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.ui.screens
+package com.example.auralocalai.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -43,18 +43,15 @@ fun ModelManagerScreen(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text("LOCAL LLM MANAGER", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp, color = MaterialTheme.colorScheme.primary) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Go Back", tint = MaterialTheme.colorScheme.primary)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-                )
-                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
-            }
+            TopAppBar(
+                title = { Text("LOCAL LLM MANAGER", fontSize = 18.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Go Back", tint = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+            )
         },
         containerColor = MaterialTheme.colorScheme.background,
         modifier = modifier.fillMaxSize()
@@ -70,10 +67,8 @@ fun ModelManagerScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
-                    border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
-                    shape = RoundedCornerShape(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -98,7 +93,7 @@ fun ModelManagerScreen(
                 Text(
                     text = "Recommended Mobile Presets",
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
@@ -130,18 +125,15 @@ fun ModelManagerScreen(
                         .fillMaxWidth()
                         .padding(top = 8.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = if (isCustomExpanded) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant
                     ),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    shape = RoundedCornerShape(20.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { isCustomExpanded = !isCustomExpanded }
-                                .padding(vertical = 4.dp),
+                                .clickable { isCustomExpanded = !isCustomExpanded },
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -154,8 +146,7 @@ fun ModelManagerScreen(
                             Text(
                                 text = if (isCustomExpanded) "Collapse ?" else "Expand ?",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -177,11 +168,10 @@ fun ModelManagerScreen(
                                     value = customUrl,
                                     onValueChange = { customUrl = it },
                                     label = { Text("Direct Model URL") },
-                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                                     )
                                 )
 
@@ -189,11 +179,10 @@ fun ModelManagerScreen(
                                     value = customFileName,
                                     onValueChange = { customFileName = it },
                                     label = { Text("Local Filename (must end in .task)") },
-                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                                     )
                                 )
 
@@ -205,11 +194,10 @@ fun ModelManagerScreen(
                                         }
                                     },
                                     enabled = customUrl.isNotBlank() && customFileName.endsWith(".task") && uiState.currentDownloadingModelId == null,
-                                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                                    shape = RoundedCornerShape(23.dp),
+                                    modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                                 ) {
-                                    Text("Start Custom Download", fontWeight = FontWeight.Bold)
+                                    Text("Start Custom Download")
                                 }
                             }
                         }
@@ -234,14 +222,17 @@ fun PresetModelCard(
 ) {
     Card(
         modifier = Modifier
-            .fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(
-            width = if (isActive) 1.5.dp else 1.dp,
-            color = if (isActive) MaterialTheme.colorScheme.primary else Color(0xFFE2E8F0)
-        ),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = when {
+                    isActive -> MaterialTheme.colorScheme.primary
+                    isDownloading -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
+                    else -> Color.Transparent
+                },
+                shape = RoundedCornerShape(12.dp)
+            ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Title & Badges row
@@ -255,74 +246,45 @@ fun PresetModelCard(
                         text = preset.name,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onBackground
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Size Pill tag
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFEFF6FF))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Size: ",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E40AF)
-                            )
-                        }
-
-                        // RAM requirement Pill tag
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFF5F3FF))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "RAM: ",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF5B21B6)
-                            )
-                        }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Size: ${preset.sizeLabel}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "RAM: ${preset.ramRequirement}",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
                 if (isActive) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFD1FAE5))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Active",
-                                tint = Color(0xFF065F46),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "ACTIVE",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF065F46)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Active",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "ACTIVE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = preset.description,
                 fontSize = 13.sp,
@@ -341,48 +303,30 @@ fun PresetModelCard(
                 ) {
                     if (isDownloaded) {
                         if (isActive) {
-                            Box(
-                                modifier = Modifier
-                                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = "Loaded & Ready Offline",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                            Text(
+                                text = "Model Loaded & Offline Ready",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         } else {
                             val isLoading = modelState is ModelState.Loading
                             Button(
                                 onClick = onLoad,
                                 enabled = !isLoading,
-                                shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier.height(36.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
-                                Text(
-                                    text = if (isLoading) "Loading..." else "Load Model",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Text(if (isLoading) "Loading..." else "Load Model")
                             }
                         }
                     } else {
                         Button(
                             onClick = onDownload,
-                            shape = RoundedCornerShape(18.dp),
-                            modifier = Modifier.height(36.dp),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                         ) {
-                            Text(
-                                text = "Download ()",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text("Download (${preset.sizeLabel})")
                         }
                     }
                 }
@@ -399,18 +343,14 @@ fun DownloadProgressPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFFF8FAFC))
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
-            .padding(14.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(12.dp)
     ) {
         when (state) {
             DownloadState.Idle -> {
-                Text("Initializing connection...", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(4.dp)),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Text("Initializing connection...", fontSize = 12.sp)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
             }
             is DownloadState.Progress -> {
                 val speedMb = state.speedBytesPerSec / (1024.0 * 1024.0)
@@ -422,7 +362,7 @@ fun DownloadProgressPanel(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Downloading: %",
+                        text = "Downloading: ${state.percentage}%",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.secondary
@@ -430,7 +370,6 @@ fun DownloadProgressPanel(
                     Text(
                         text = String.format(Locale.US, "%.1f MB/s", speedMb),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -442,7 +381,7 @@ fun DownloadProgressPanel(
                         .padding(vertical = 8.dp)
                         .clip(RoundedCornerShape(4.dp)),
                     color = MaterialTheme.colorScheme.secondary,
-                    trackColor = Color(0xFFE2E8F0)
+                    trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
                 )
 
                 Row(
@@ -453,7 +392,6 @@ fun DownloadProgressPanel(
                     Text(
                         text = String.format(Locale.US, "%.0f/%.0f MB (ETA: %d s)", downloadedMb, totalMb, state.etaSeconds),
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
@@ -478,9 +416,8 @@ fun DownloadProgressPanel(
             is DownloadState.Error -> {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Error: ",
+                        text = "Error: ${state.message}",
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error
                     )
                     Spacer(modifier = Modifier.height(4.dp))
@@ -498,3 +435,4 @@ fun DownloadProgressPanel(
         }
     }
 }
+
