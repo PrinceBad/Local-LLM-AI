@@ -2,6 +2,7 @@ package com.example.auralocalai.data
 
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.example.auralocalai.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -32,10 +33,15 @@ class LlmInferenceEngine(private val context: Context) {
                 return@withContext Result.failure(Exception("Model file does not exist at: $modelPath"))
             }
 
+            val backend = if (BuildConfig.BACKEND_TYPE == "NPU") {
+                LlmInference.Backend.DEFAULT
+            } else {
+                LlmInference.Backend.GPU
+            }
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(1024)
-                .setPreferredBackend(LlmInference.Backend.GPU) // Leverage mobile GPU (Vulkan/Metal)
+                .setPreferredBackend(backend)
                 .build()
 
             llmInference = LlmInference.createFromOptions(context, options)

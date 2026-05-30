@@ -28,8 +28,21 @@ android {
     buildFeatures {
       compose = true
       aidl = false
-      buildConfig = false
+      buildConfig = true
       shaders = false
+    }
+
+    flavorDimensions.add("target")
+    productFlavors {
+        create("normal") {
+            dimension = "target"
+            buildConfigField("String", "BACKEND_TYPE", "\"NORMAL\"")
+        }
+        create("npu") {
+            dimension = "target"
+            buildConfigField("String", "BACKEND_TYPE", "\"NPU\"")
+            applicationIdSuffix = ".npu"
+        }
     }
 
     packaging {
@@ -89,4 +102,8 @@ dependencies {
 
   // OkHttp for streaming network downloads
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+  // Offline OCR and Image Loading
+  implementation("com.google.mlkit:text-recognition:16.0.1")
+  implementation("io.coil-kt:coil-compose:2.6.0")
 }
