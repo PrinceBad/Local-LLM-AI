@@ -85,7 +85,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     private val inferenceEngine = LlmInferenceEngine(application.applicationContext)
     
     private val storageDir: File by lazy {
-        application.filesDir
+        val dir = application.getExternalFilesDir(null) ?: application.filesDir
+        File(dir, "models").apply { mkdirs() }
     }
 
     private var downloadJob: Job? = null
@@ -131,26 +132,41 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private fun migrateExistingModels() {
-        val oldDir = getApplication<Application>().getExternalFilesDir(null)
-        val newDir = getApplication<Application>().filesDir
-        if (oldDir != null && oldDir.exists() && oldDir != newDir) {
-            val oldFiles = oldDir.listFiles() ?: emptyArray()
-            for (file in oldFiles) {
+        val targetDir = storageDir
+        
+        // 1. Migrate from old direct external files dir
+        val oldExternalDir = getApplication<Application>().getExternalFilesDir(null)
+        if (oldExternalDir != null && oldExternalDir.exists() && oldExternalDir != targetDir) {
+            val files = oldExternalDir.listFiles() ?: emptyArray()
+            for (file in files) {
                 if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin"))) {
-                    val destFile = File(newDir, file.name)
-                    if (!destFile.exists()) {
-                        try {
+                    val destFile = File(targetDir, file.name)
+                    try {
+                        if (!destFile.exists()) {
                             file.copyTo(destFile, overwrite = true)
-                            file.delete()
-                        } catch (e: Exception) {
-                            // Silently ignore
                         }
-                    } else {
-                        try {
-                            file.delete()
-                        } catch (e: Exception) {
-                            // Silently ignore
+                        file.delete()
+                    } catch (e: Exception) {
+                        // Silently ignore
+                    }
+                }
+            }
+        }
+
+        // 2. Migrate from old internal files dir
+        val oldInternalDir = getApplication<Application>().filesDir
+        if (oldInternalDir.exists() && oldInternalDir != targetDir) {
+            val files = oldInternalDir.listFiles() ?: emptyArray()
+            for (file in files) {
+                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin"))) {
+                    val destFile = File(targetDir, file.name)
+                    try {
+                        if (!destFile.exists()) {
+                            file.copyTo(destFile, overwrite = true)
                         }
+                        file.delete()
+                    } catch (e: Exception) {
+                        // Silently ignore
                     }
                 }
             }
