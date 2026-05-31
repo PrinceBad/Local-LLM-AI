@@ -276,6 +276,31 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteModel(fileName: String) {
+        viewModelScope.launch {
+            try {
+                val file = File(storageDir, fileName)
+                if (file.exists()) {
+                    file.delete()
+                }
+                val matchingPreset = presets.firstOrNull { it.fileName == fileName }
+                val presetId = matchingPreset?.id ?: fileName
+                if (uiState.value.activeModelId == presetId) {
+                    inferenceEngine.close()
+                    _uiState.update { 
+                        it.copy(
+                            modelState = ModelState.Unloaded,
+                            activeModelId = null
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore errors
+            }
+            refreshDownloadedModels()
+        }
+    }
+
     fun cancelDownload() {
         downloadJob?.cancel()
         try {

@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -119,7 +120,8 @@ fun ModelManagerScreen(
                     modelState = uiState.modelState,
                     onDownload = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
-                    onCancel = { viewModel.cancelDownload() }
+                    onCancel = { viewModel.cancelDownload() },
+                    onDelete = { viewModel.deleteModel(preset.fileName) }
                 )
             }
 
@@ -230,7 +232,8 @@ fun PresetModelCard(
     modelState: ModelState,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -355,19 +358,41 @@ fun PresetModelCard(
                             }
                         } else {
                             val isLoading = modelState is ModelState.Loading
-                            Button(
-                                onClick = onLoad,
-                                enabled = !isLoading,
-                                shape = RoundedCornerShape(18.dp),
-                                modifier = Modifier.height(36.dp),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = if (isLoading) "Loading..." else "Load Model",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                OutlinedButton(
+                                    onClick = onDelete,
+                                    enabled = !isLoading,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete model",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Delete", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = onLoad,
+                                    enabled = !isLoading,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Text(
+                                        text = if (isLoading) "Loading..." else "Load Model",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     } else {
