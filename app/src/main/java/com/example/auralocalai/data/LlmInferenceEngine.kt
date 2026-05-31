@@ -34,6 +34,16 @@ class LlmInferenceEngine(private val context: Context) {
                 return@withContext Result.failure(Exception("Model file does not exist at: $modelPath"))
             }
 
+            // Check for minimum size to prevent loading incomplete or corrupted files
+            val isPreset = modelFile.name.contains("qwen-1.5b") 
+                    || modelFile.name.contains("deepseek-r1") 
+                    || modelFile.name.contains("gemma-2b") 
+                    || modelFile.name.contains("phi-2")
+            val minSize = if (isPreset) 1_000_000_000L else 10_000_000L
+            if (modelFile.length() < minSize) {
+                return@withContext Result.failure(Exception("Model file is incomplete or corrupted (Size is only ${modelFile.length() / (1024 * 1024)} MB). Please delete and re-download the model."))
+            }
+
             val isEmulator = Build.FINGERPRINT.startsWith("generic")
                     || Build.FINGERPRINT.startsWith("unknown")
                     || Build.MODEL.contains("google_sdk")

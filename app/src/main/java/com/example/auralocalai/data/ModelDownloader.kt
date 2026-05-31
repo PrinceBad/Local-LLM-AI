@@ -109,6 +109,11 @@ class ModelDownloader(
                 }
             }
 
+            if (totalBytes > 0 && totalBytesRead < totalBytes) {
+                emit(DownloadState.Error("Connection interrupted: Only downloaded ${totalBytesRead / (1024 * 1024)} MB of ${totalBytes / (1024 * 1024)} MB. Please check your network and try again."))
+                return@flow
+            }
+
             emit(DownloadState.Success(destinationFile.absolutePath))
         } catch (e: IOException) {
             emit(DownloadState.Error(e.message ?: "Network error occurred"))
