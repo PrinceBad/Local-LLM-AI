@@ -36,18 +36,7 @@ android {
       shaders = false
     }
 
-    flavorDimensions.add("target")
-    productFlavors {
-        create("normal") {
-            dimension = "target"
-            buildConfigField("String", "BACKEND_TYPE", "\"NORMAL\"")
-        }
-        create("npu") {
-            dimension = "target"
-            buildConfigField("String", "BACKEND_TYPE", "\"NPU\"")
-            applicationIdSuffix = ".npu"
-        }
-    }
+    
 
     packaging {
       resources {

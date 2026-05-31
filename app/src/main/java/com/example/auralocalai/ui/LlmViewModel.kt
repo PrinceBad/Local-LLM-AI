@@ -1,6 +1,7 @@
 package com.example.auralocalai.ui
 
 import android.app.Application
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.auralocalai.data.DownloadState
@@ -159,25 +160,45 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     init {
         migrateExistingModels()
         refreshDownloadedModels()
-        // Auto-load the first available downloaded model
-        viewModelScope.launch {
-            val firstDownloaded = uiState.value.localModels.firstOrNull()
-            if (firstDownloaded != null) {
-                val matchingPreset = presets.firstOrNull { it.fileName == firstDownloaded }
-                val modelName = matchingPreset?.name ?: firstDownloaded
-                val modelId = matchingPreset?.id ?: firstDownloaded
-                
-                _uiState.update { it.copy(modelState = ModelState.Loading) }
-                val result = inferenceEngine.loadModel(File(storageDir, firstDownloaded).absolutePath)
-                if (result.isSuccess) {
-                    _uiState.update { 
-                        it.copy(
-                            modelState = ModelState.Loaded(modelName),
-                            activeModelId = modelId
-                        )
+        
+        // Auto-load the first available downloaded model (skip on emulators/x86 to prevent error popups on startup)
+        val isEmulator = Build.FINGERPRINT.startsWith("generic")
+                || Build.FINGERPRINT.startsWith("unknown")
+                || Build.MODEL.contains("google_sdk")
+                || Build.MODEL.contains("Emulator")
+                || Build.MODEL.contains("Android SDK built for x86")
+                || Build.HARDWARE.contains("goldfish")
+                || Build.HARDWARE.contains("ranchu")
+                || Build.MANUFACTURER.contains("Genymotion")
+                || Build.PRODUCT.contains("sdk_google")
+                || Build.PRODUCT.contains("google_sdk")
+                || Build.PRODUCT.contains("sdk")
+                || Build.PRODUCT.contains("sdk_x86")
+                || Build.PRODUCT.contains("vbox86p")
+                || Build.PRODUCT.contains("emulator")
+                || Build.PRODUCT.contains("simulator")
+                || Build.SUPPORTED_ABIS.any { it.contains("x86") }
+
+        if (!isEmulator) {
+            viewModelScope.launch {
+                val firstDownloaded = uiState.value.localModels.firstOrNull()
+                if (firstDownloaded != null) {
+                    val matchingPreset = presets.firstOrNull { it.fileName == firstDownloaded }
+                    val modelName = matchingPreset?.name ?: firstDownloaded
+                    val modelId = matchingPreset?.id ?: firstDownloaded
+                    
+                    _uiState.update { it.copy(modelState = ModelState.Loading) }
+                    val result = inferenceEngine.loadModel(File(storageDir, firstDownloaded).absolutePath)
+                    if (result.isSuccess) {
+                        _uiState.update { 
+                            it.copy(
+                                modelState = ModelState.Loaded(modelName),
+                                activeModelId = modelId
+                            )
+                        }
+                    } else {
+                        _uiState.update { it.copy(modelState = ModelState.Error(result.exceptionOrNull()?.message ?: "Failed to auto-load")) }
                     }
-                } else {
-                    _uiState.update { it.copy(modelState = ModelState.Error(result.exceptionOrNull()?.message ?: "Failed to auto-load")) }
                 }
             }
         }

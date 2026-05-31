@@ -2,7 +2,7 @@
 
 # Local LLM/AI
 
-### A premium, high-performance offline Android client for running Large Language Models (LLMs) on-device with multimodal OCR and NPU acceleration.
+### A premium, high-performance offline Android client for running Large Language Models (LLMs) on-device with multimodal OCR.
 
 <br/>
 
@@ -28,9 +28,7 @@ Additionally, this application executes all calculations offline. No internet co
 
 Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Qwen 2.5, DeepSeek-R1, Phi-2, and Gemma 2B) natively on mobile hardware. 
 
-The app includes dynamic backend routing depending on the build flavor:
-- **Normal Flavor**: Targets GPU acceleration (Vulkan) for responsive streaming generation with graceful CPU fallback.
-- **NPU Flavor**: Configured to delegate inference directly to the device's system NPU/AI chip via NNAPI.
+The app targets GPU acceleration (Vulkan) for responsive streaming generation with graceful CPU fallback.
 
 The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface featuring offline OCR document parsing, video/file media integration, and background download handling.
 
@@ -54,7 +52,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 | Inference | Multimodal & OCR (100% Offline) |
 | --- | --- |
 | High-performance offline LLM execution | Attach Images, Videos & Documents (PDF, Code, Text) |
-| Dual-flavor release (`normal` Vulkan GPU & `npu` routing) | Offline image OCR text extraction using Google ML Kit |
+| Vulkan GPU acceleration with graceful CPU fallback | Offline image OCR text extraction using Google ML Kit |
 | Graceful CPU fallback optimization | Offline page-by-page PDF rendering and text recognition |
 | Streaming word-by-word responses | Playback attached videos natively and view documents via Intent |
 
@@ -83,9 +81,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 Grab the latest compiled APKs from the [GitHub releases page](releases/latest).
 
-We compile two separate releases for each update:
-1. **Normal Release (`app-normal-release-unsigned.apk`)**: Optimized for general devices using mobile GPU (Vulkan) or CPU.
-2. **NPU Release (`app-npu-release-unsigned.apk`)**: Designed for modern phones featuring specialized AI chips (NPU), utilizing neural network API routing (`LlmInference.Backend.DEFAULT`). Includes the `.npu` application suffix so you can install both releases side-by-side.
+The release APK (`app-release-unsigned.apk`) is optimized for mobile hardware using on-device GPU (Vulkan) or CPU.
 
 ---
 
@@ -93,16 +89,10 @@ We compile two separate releases for each update:
 
 To compile the application yourself, ensure you have Java 17 and Android SDK set up. Set your JDK path and run the compilation:
 
-### Build Normal Flavor
+### Build Release APK
 ```powershell
 $env:JAVA_HOME = "C:\Users\Badsiwal\.gradle\jdks\eclipse_adoptium-17-amd64-windows.2"
-./gradlew assembleNormalRelease
-```
-
-### Build NPU Flavor
-```powershell
-$env:JAVA_HOME = "C:\Users\Badsiwal\.gradle\jdks\eclipse_adoptium-17-amd64-windows.2"
-./gradlew assembleNpuRelease
+./gradlew assembleRelease
 ```
 
 ---

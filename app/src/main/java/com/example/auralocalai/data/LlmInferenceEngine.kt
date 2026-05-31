@@ -49,14 +49,13 @@ class LlmInferenceEngine(private val context: Context) {
                     || Build.PRODUCT.contains("vbox86p")
                     || Build.PRODUCT.contains("emulator")
                     || Build.PRODUCT.contains("simulator")
+            val isX86 = Build.SUPPORTED_ABIS.any { it.contains("x86") }
 
-            val backend = if (isEmulator) {
-                LlmInference.Backend.CPU
-            } else if (BuildConfig.BACKEND_TYPE == "NPU") {
-                LlmInference.Backend.DEFAULT
-            } else {
-                LlmInference.Backend.GPU
+            if (isEmulator || isX86) {
+                return@withContext Result.failure(Exception("Offline LLM Inference is not supported on x86/x86_64 emulators due to native ARM64 Neon vector instruction translation limits (Berberis SIGSEGV). Please use a physical arm64-v8a device or an ARM64 virtual device."))
             }
+
+            val backend = LlmInference.Backend.GPU
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(1024)
