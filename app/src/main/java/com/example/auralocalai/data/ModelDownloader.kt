@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.data
+package com.example.auralocalai.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -45,7 +45,7 @@ class ModelDownloader(
         try {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
-                emit(DownloadState.Error("Failed to download model: HTTP "))
+                emit(DownloadState.Error("Failed to download model: HTTP ${response.code}"))
                 return@flow
             }
 
@@ -62,7 +62,7 @@ class ModelDownloader(
             destinationFile.parentFile?.mkdirs()
             val outputStream = FileOutputStream(destinationFile)
 
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(65536) // 64 KB buffer for high-performance chunked file streaming
             var bytesRead: Int
             var totalBytesRead: Long = 0
             val startTime = System.currentTimeMillis()

@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.ui.screens
+package com.example.auralocalai.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -478,7 +478,7 @@ fun DownloadProgressPanel(
             is DownloadState.Error -> {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Error: ",
+                        text = "Error: ${state.message}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error

@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.ui
+package com.example.auralocalai.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -84,7 +84,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     private val inferenceEngine = LlmInferenceEngine(application.applicationContext)
     
     private val storageDir: File by lazy {
-        application.getExternalFilesDir(null) ?: application.filesDir
+        application.filesDir
     }
 
     private var downloadJob: Job? = null
@@ -129,7 +129,35 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         )
     )
 
+    private fun migrateExistingModels() {
+        val oldDir = getApplication<Application>().getExternalFilesDir(null)
+        val newDir = getApplication<Application>().filesDir
+        if (oldDir != null && oldDir.exists() && oldDir != newDir) {
+            val oldFiles = oldDir.listFiles() ?: emptyArray()
+            for (file in oldFiles) {
+                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin"))) {
+                    val destFile = File(newDir, file.name)
+                    if (!destFile.exists()) {
+                        try {
+                            file.copyTo(destFile, overwrite = true)
+                            file.delete()
+                        } catch (e: Exception) {
+                            // Silently ignore
+                        }
+                    } else {
+                        try {
+                            file.delete()
+                        } catch (e: Exception) {
+                            // Silently ignore
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     init {
+        migrateExistingModels()
         refreshDownloadedModels()
         // Auto-load the first available downloaded model
         viewModelScope.launch {
@@ -174,14 +202,54 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        val tempFileName = "$fileName.tmp"
+        val tempFile = File(storageDir, tempFileName)
         val destFile = File(storageDir, fileName)
+
+        // Delete any leftover temp files first
+        if (tempFile.exists()) {
+            tempFile.delete()
+        }
+
         downloadJob = viewModelScope.launch {
-            downloader.downloadModel(url, destFile).collect { state ->
+            downloader.downloadModel(url, tempFile).collect { state ->
                 _uiState.update { it.copy(downloadState = state) }
                 if (state is DownloadState.Success) {
-                    refreshDownloadedModels()
-                    // Auto load the newly downloaded model
-                    loadModel(fileName, modelId)
+                    var renameSuccess = false
+                    try {
+                        if (tempFile.exists()) {
+                            renameSuccess = tempFile.renameTo(destFile)
+                        }
+                    } catch (e: Exception) {
+                        renameSuccess = false
+                    }
+
+                    if (renameSuccess) {
+                        _uiState.update { 
+                            it.copy(
+                                currentDownloadingModelId = null,
+                                downloadState = DownloadState.Idle
+                            )
+                        }
+                        refreshDownloadedModels()
+                        // Auto load the newly downloaded model
+                        loadModel(fileName, modelId)
+                    } else {
+                        if (tempFile.exists()) tempFile.delete()
+                        _uiState.update {
+                            it.copy(
+                                currentDownloadingModelId = null,
+                                downloadState = DownloadState.Error("Failed to rename completed model download")
+                            )
+                        }
+                    }
+                } else if (state is DownloadState.Error) {
+                    if (tempFile.exists()) tempFile.delete()
+                    _uiState.update {
+                        it.copy(
+                            currentDownloadingModelId = null
+                        )
+                    }
                 }
             }
         }
@@ -189,6 +257,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelDownload() {
         downloadJob?.cancel()
+        try {
+            val files = storageDir.listFiles() ?: emptyArray()
+            files.filter { it.isFile && it.name.endsWith(".tmp") }.forEach { it.delete() }
+        } catch (e: Exception) {
+            // Ignore clean up errors
+        }
         _uiState.update { 
             it.copy(
                 downloadState = DownloadState.Idle,
