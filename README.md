@@ -6,9 +6,9 @@
 
 <br/>
 
-[![Latest release](https://img.shields.io/badge/releases-GitHub-181717?style=for-the-badge&logo=github&labelColor=0d1117)](releases/latest)
+[![Latest release](https://img.shields.io/badge/releases-GitHub-181717?style=for-the-badge&logo=github&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=0d1117)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/PrinceBad/Local-LLM-AI/total?style=for-the-badge&labelColor=0d1117)](releases)
+[![Downloads](https://img.shields.io/github/downloads/PrinceBad/Local-LLM-AI/total?style=for-the-badge&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases)
 [![Android](https://img.shields.io/badge/platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white&labelColor=0d1117)](#download)
 <br/>
 
@@ -63,6 +63,12 @@ The app includes built-in presets for several highly-capable, lightweight models
 | Interactive file attachments preview drawer | Multi-turn chat context memory (6-turn history) |
 | Collapsible OCR logs under bubble cards | Quantized weights optimizations |
 
+### Recent UI/UX Optimizations (v1.1+)
+- **Consolidated Top Header**: Reduced vertical height to 56.dp, center-aligned settings and delete icons, added system status bar padding, and cleaned up loaded model titles.
+- **Refined Chat Bubbles**: Applied uniform 16.dp corner radius with a sharp 4.dp anchor corner on the sender's edge, expanded text margins, and integrated high-contrast borders for light and dark themes.
+- **Sleek Input & Attachments**: Replaced individual file buttons with a single "+" dropdown trigger, introduced a compact text input area using custom BasicTextField, and implemented state-based styling for the send controls.
+- **Seamless Keyboard Handling**: Redesigned layout flow to use sequential vertical Column with .imePadding(), automatically shifting the input bar and triggering auto-scroll to the bottom upon soft keyboard popups without leaving blank gaps.
+
 ---
 
 ## Screenshots
@@ -79,7 +85,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 ## Download
 
-Grab the latest compiled APKs from the [GitHub releases page](releases/latest).
+Grab the latest compiled APKs from the [GitHub releases page](https://github.com/PrinceBad/Local-LLM-AI/releases/latest).
 
 The release APK (`app-release-unsigned.apk`) is optimized for mobile hardware using on-device GPU (Vulkan) or CPU.
 

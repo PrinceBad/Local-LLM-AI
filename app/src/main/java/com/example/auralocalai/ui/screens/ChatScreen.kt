@@ -24,8 +24,12 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,7 +58,7 @@ import android.widget.Toast
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.ui.graphics.graphicsLayer
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
     viewModel: LlmViewModel,
@@ -66,6 +70,7 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     var textInput by remember { mutableStateOf("") }
     val context = LocalContext.current
+    var showAttachmentMenu by remember { mutableStateOf(false) }
 
     var isListening by remember { mutableStateOf(false) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
@@ -201,34 +206,53 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                text = "LOCAL LLM/AI",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 1.2.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            val subtitleText = when (val state = uiState.modelState) {
-                                is ModelState.Loaded -> "Local Active: " + state.modelName
-                                ModelState.Loading -> "Loading Model..."
-                                is ModelState.Error -> "Engine Error"
-                                ModelState.Unloaded -> "No model loaded (Offline)"
-                            }
-                            Text(
-                                text = subtitleText,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surface)
+                    .statusBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "Local LLM/AI",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.0.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        val subtitleText = when (val state = uiState.modelState) {
+                            is ModelState.Loaded -> state.modelName.replace("(Alibaba)", "").trim()
+                            ModelState.Loading -> "Loading Model..."
+                            is ModelState.Error -> "Engine Error"
+                            ModelState.Unloaded -> "No model loaded (Offline)"
                         }
-                    },
-                    actions = {
+                        Text(
+                            text = subtitleText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         if (uiState.messages.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.clearChat() }) {
+                            IconButton(
+                                onClick = { viewModel.clearChat() },
+                                modifier = Modifier.size(40.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Delete,
                                     contentDescription = "Clear Chat",
@@ -236,82 +260,80 @@ fun ChatScreen(
                                 )
                             }
                         }
-                        IconButton(onClick = onNavigateToModelManager) {
+                        IconButton(
+                            onClick = onNavigateToModelManager,
+                            modifier = Modifier.size(40.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
                                 contentDescription = "Model Settings",
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
+                    }
+                }
                 HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
             }
         },
         containerColor = MaterialTheme.colorScheme.background,
         modifier = modifier.fillMaxSize()
     ) { paddingValues ->
-        Box(
+        Column(
             modifier = Modifier
                 .padding(paddingValues)
                 .fillMaxSize()
+                .imePadding()
         ) {
-            if (uiState.messages.isEmpty()) {
-                // Onboarding screen if no messages
-                EmptyStateOnboarding(
-                    modelState = uiState.modelState,
-                    localModels = uiState.localModels,
-                    onNavigateToModelManager = onNavigateToModelManager,
-                    onQuickPrompt = { prompt ->
-                        viewModel.sendMessage(prompt)
-                    }
-                )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 96.dp)
-                ) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        items(uiState.messages) { message ->
-                            ChatBubble(message = message)
-                        }
+            val isKeyboardVisible = WindowInsets.isImeVisible
+            LaunchedEffect(isKeyboardVisible, uiState.messages.size, uiState.isGenerating) {
+                if (uiState.messages.isNotEmpty()) {
+                    listState.animateScrollToItem(uiState.messages.size - 1)
+                }
+            }
 
-                        if (uiState.isGenerating) {
-                            item {
-                                TypingIndicatorBubble()
-                            }
+            if (uiState.messages.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    EmptyStateOnboarding(
+                        modelState = uiState.modelState,
+                        localModels = uiState.localModels,
+                        onNavigateToModelManager = onNavigateToModelManager,
+                        onQuickPrompt = { prompt ->
+                            viewModel.sendMessage(prompt)
+                        }
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(uiState.messages) { message ->
+                        ChatBubble(message = message)
+                    }
+
+                    if (uiState.isGenerating) {
+                        item {
+                            TypingIndicatorBubble()
                         }
                     }
                 }
             }
 
-            // Floating bottom text inputs
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                MaterialTheme.colorScheme.background.copy(alpha = 0.95f)
-                            )
-                        )
-                    )
-                    .padding(horizontal = 16.dp, vertical = 16.dp)
-            ) {
-                if (uiState.modelState is ModelState.Loaded) {
+            // Bottom text inputs (or loading/error state card)
+            if (uiState.modelState is ModelState.Loaded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -437,52 +459,76 @@ fun ChatScreen(
                                 modifier = Modifier.padding(vertical = 4.dp)
                             )
                         }
-                        
+
+                        // Input control row (attachment consolidated button, voice button, text field, send button)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    onClick = { imageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                                    enabled = !hasAttachment && !uiState.isGenerating,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Image,
-                                        contentDescription = "Attach Image",
-                                        tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                
-                                IconButton(
-                                    onClick = { videoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
-                                    enabled = !hasAttachment && !uiState.isGenerating,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayCircle,
-                                        contentDescription = "Attach Video",
-                                        tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                
-                                IconButton(
-                                    onClick = { fileLauncher.launch("*/*") },
-                                    enabled = !hasAttachment && !uiState.isGenerating,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Description,
-                                        contentDescription = "Attach File",
-                                        tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Consolidated "+" attachment button with DropdownMenu
+                                Box {
+                                    IconButton(
+                                        onClick = { showAttachmentMenu = true },
+                                        enabled = !hasAttachment && !uiState.isGenerating,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Attach Content",
+                                            tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    
+                                    DropdownMenu(
+                                        expanded = showAttachmentMenu,
+                                        onDismissRequest = { showAttachmentMenu = false },
+                                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Attach Image") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Image,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                imageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Attach Video") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayCircle,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                videoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Attach Document") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Description,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                fileLauncher.launch("*/*")
+                                            }
+                                        )
+                                    }
                                 }
 
                                 // Glowing pulsing offline Mic Voice Input button
@@ -539,21 +585,30 @@ fun ChatScreen(
                             
                             Spacer(modifier = Modifier.width(4.dp))
                             
-                            TextField(
+                            // Sleek and compact BasicTextField instead of the bulky TextField
+                            BasicTextField(
                                 value = textInput,
                                 onValueChange = { textInput = it },
-                                placeholder = { Text("Ask Local LLM/AI...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 15.sp) },
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    disabledContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                textStyle = LocalTextStyle.current.copy(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 15.sp
                                 ),
-                                modifier = Modifier.weight(1f),
-                                maxLines = 4
+                                maxLines = 4,
+                                decorationBox = { innerTextField ->
+                                    Box(contentAlignment = Alignment.CenterStart) {
+                                        if (textInput.isEmpty()) {
+                                            Text(
+                                                text = "Ask Local LLM/AI...",
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                                fontSize = 15.sp
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                }
                             )
                             
                             Spacer(modifier = Modifier.width(4.dp))
@@ -569,19 +624,33 @@ fun ChatScreen(
                                     .size(40.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (canSend) MaterialTheme.colorScheme.primary else Color(0xFFF1F5F9)
+                                        if (canSend) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                        }
                                     )
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Send,
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Send Message",
-                                    tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                    tint = if (canSend) {
+                                        Color.White
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                    },
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
-                } else {
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
                     Button(
                         onClick = onNavigateToModelManager,
                         modifier = Modifier
@@ -619,15 +688,16 @@ fun ChatBubble(message: ChatMessage) {
 
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
     val shape = if (message.isUser) {
-        RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
+        RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
     } else {
-        RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
+        RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp)
     }
 
     val borderStroke = if (message.isUser) {
         BorderStroke(0.dp, Color.Transparent)
     } else {
-        BorderStroke(1.dp, Color(0xFFE2E8F0))
+        val borderColor = if (isSystemInDarkTheme()) Color(0xFF1E293B) else Color(0xFFCBD5E1)
+        BorderStroke(1.dp, borderColor)
     }
 
     val textColor = if (message.isUser) {
@@ -651,7 +721,7 @@ fun ChatBubble(message: ChatMessage) {
             ),
             modifier = Modifier.widthIn(max = 290.dp)
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 if (message.imageUri != null) {
                     AsyncImage(
                         model = message.imageUri,
@@ -667,6 +737,7 @@ fun ChatBubble(message: ChatMessage) {
                 
                 if (message.videoUri != null) {
                     val context = LocalContext.current
+    var showAttachmentMenu by remember { mutableStateOf(false) }
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
@@ -717,6 +788,7 @@ fun ChatBubble(message: ChatMessage) {
 
                 if (message.fileUri != null) {
                     val context = LocalContext.current
+    var showAttachmentMenu by remember { mutableStateOf(false) }
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
@@ -755,7 +827,7 @@ fun ChatBubble(message: ChatMessage) {
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = "${message.fileType?.uppercase() ?: "Document"} • Tap to open",
+                                    text = "${message.fileType?.uppercase() ?: "Document"} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Tap to open",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -771,7 +843,7 @@ fun ChatBubble(message: ChatMessage) {
                         color = textColor,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
                 }
                 
