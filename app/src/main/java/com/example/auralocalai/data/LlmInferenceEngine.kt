@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import android.os.Build
 import java.io.File
 
 class LlmInferenceEngine(private val context: Context) {
@@ -33,7 +34,25 @@ class LlmInferenceEngine(private val context: Context) {
                 return@withContext Result.failure(Exception("Model file does not exist at: $modelPath"))
             }
 
-            val backend = if (BuildConfig.BACKEND_TYPE == "NPU") {
+            val isEmulator = Build.FINGERPRINT.startsWith("generic")
+                    || Build.FINGERPRINT.startsWith("unknown")
+                    || Build.MODEL.contains("google_sdk")
+                    || Build.MODEL.contains("Emulator")
+                    || Build.MODEL.contains("Android SDK built for x86")
+                    || Build.HARDWARE.contains("goldfish")
+                    || Build.HARDWARE.contains("ranchu")
+                    || Build.MANUFACTURER.contains("Genymotion")
+                    || Build.PRODUCT.contains("sdk_google")
+                    || Build.PRODUCT.contains("google_sdk")
+                    || Build.PRODUCT.contains("sdk")
+                    || Build.PRODUCT.contains("sdk_x86")
+                    || Build.PRODUCT.contains("vbox86p")
+                    || Build.PRODUCT.contains("emulator")
+                    || Build.PRODUCT.contains("simulator")
+
+            val backend = if (isEmulator) {
+                LlmInference.Backend.CPU
+            } else if (BuildConfig.BACKEND_TYPE == "NPU") {
                 LlmInference.Backend.DEFAULT
             } else {
                 LlmInference.Backend.GPU
