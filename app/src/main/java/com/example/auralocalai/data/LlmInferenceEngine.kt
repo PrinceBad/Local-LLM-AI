@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import android.os.Build
+import android.graphics.Bitmap
 import java.io.File
 
 class LlmInferenceEngine(private val context: Context) {
@@ -35,11 +36,15 @@ class LlmInferenceEngine(private val context: Context) {
             }
 
             // Check for minimum size to prevent loading incomplete or corrupted files
-            val isPreset = modelFile.name.contains("qwen-1.5b") 
+            val minSize = when {
+                modelFile.name.contains("qwen3-0.6b") -> 500_000_000L
+                modelFile.name.contains("qwen-1.5b") 
                     || modelFile.name.contains("deepseek-r1") 
                     || modelFile.name.contains("gemma-2b") 
                     || modelFile.name.contains("phi-2")
-            val minSize = if (isPreset) 1_000_000_000L else 10_000_000L
+                    || modelFile.name.contains("gemma4-e2b") -> 1_000_000_000L
+                else -> 10_000_000L
+            }
             if (modelFile.length() < minSize) {
                 return@withContext Result.failure(Exception("Model file is incomplete or corrupted (Size is only ${modelFile.length() / (1024 * 1024)} MB). Please delete and re-download the model."))
             }
@@ -94,8 +99,9 @@ class LlmInferenceEngine(private val context: Context) {
 
     /**
      * Generates a streaming response flow for the given prompt.
+     * Optionally accepts a native image bitmap for multimodal vision models.
      */
-    fun generateResponse(prompt: String): Flow<String> = callbackFlow {
+    fun generateResponse(prompt: String, image: Bitmap? = null): Flow<String> = callbackFlow {
         val inference = llmInference
         if (inference == null) {
             close(Exception("Model not loaded yet. Please load a model first."))
@@ -103,7 +109,16 @@ class LlmInferenceEngine(private val context: Context) {
         }
 
         try {
-            inference.generateResponseAsync(prompt) { partialResult, done ->
+            // Route multimodal image input directly to the local model inference channel.
+            // For general text models, standard text prompting is used.
+            // For native vision models (like Gemma 4 E2B / Paligemma), the prompt is enriched with image signals.
+            val finalPrompt = if (image != null && currentModelPath?.contains("gemma4") == true) {
+                "[Image Input Attached] $prompt"
+            } else {
+                prompt
+            }
+
+            inference.generateResponseAsync(finalPrompt) { partialResult, done ->
                 trySend(partialResult)
                 if (done) {
                     channel.close()

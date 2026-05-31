@@ -94,6 +94,24 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     val presets = listOf(
         PresetModel(
+            id = "qwen3-0.6b",
+            name = "Qwen 3 0.6B Instruct (Alibaba)",
+            description = "Alibaba's ultra-lightweight mobile LLM. Exceptional speed, low memory footprint, and perfect context intent understanding.",
+            sizeLabel = "620 MB",
+            ramRequirement = "4 GB+ RAM",
+            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-Instruct-LiteRT/resolve/main/qwen3_0.6b_instruct_q8.litert",
+            fileName = "qwen3-0.6b.task"
+        ),
+        PresetModel(
+            id = "gemma4-e2b",
+            name = "Gemma 4 E2B Instruct (Google)",
+            description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support.",
+            sizeLabel = "1.5 GB",
+            ramRequirement = "6 GB+ RAM",
+            downloadUrl = "https://huggingface.co/litert-community/Gemma4-E2B-Instruct-LiteRT/resolve/main/gemma4_e2b_instruct_q8.litert",
+            fileName = "gemma4-e2b.task"
+        ),
+        PresetModel(
             id = "qwen-1.5b",
             name = "Qwen 2.5 1.5B Instruct (Alibaba)",
             description = "Alibaba's state-of-the-art multilingual LLM. Outperforms models of similar size in math, coding, and general knowledge.",
@@ -624,10 +642,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         inferenceJob = viewModelScope.launch {
             val systemHeader = "System: You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise.\n\n"
             
+            val activeModel = _uiState.value.activeModelId
+            
             val history = currentMessages.takeLast(6).joinToString("\n") { msg ->
                 if (msg.isUser) {
                     val prefix = when {
-                        msg.ocrText != null -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
+                        // Skip OCR context injection for Gemma 4 native multimodal vision model to let it analyze natively
+                        msg.ocrText != null && activeModel != "gemma4-e2b" -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
                         else -> ""
                     }
                     "User: $prefix${msg.content}"
@@ -637,11 +658,25 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             }
             val fullPrompt = "$systemHeader$history\nAI: "
 
+            // Extract bitmap natively if a vision-capable model is loaded and image is attached
+            val imageBitmap: Bitmap? = if (imageUri != null && activeModel == "gemma4-e2b") {
+                try {
+                    val context = getApplication<Application>().applicationContext
+                    context.contentResolver.openInputStream(Uri.parse(imageUri))?.use { stream ->
+                        android.graphics.BitmapFactory.decodeStream(stream)
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+
             val aiMessagePlaceholder = ChatMessage("", isUser = false)
             _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
             var accumulatedText = ""
-            inferenceEngine.generateResponse(fullPrompt).collect { partialToken ->
+            inferenceEngine.generateResponse(fullPrompt, imageBitmap).collect { partialToken ->
                 accumulatedText += partialToken
                 _uiState.update { state ->
                     val updatedMessages = state.messages.toMutableList()

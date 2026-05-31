@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.ui.screens
+package com.example.auralocalai.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
@@ -46,6 +46,13 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import android.content.Intent
 import android.net.Uri
+import android.speech.SpeechRecognizer
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.os.Bundle
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.ui.graphics.graphicsLayer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +66,110 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     var textInput by remember { mutableStateOf("") }
     val context = LocalContext.current
+
+    var isListening by remember { mutableStateOf(false) }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+
+    val speechIntent = remember {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toString())
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        }
+    }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                isListening = true
+                try {
+                    speechRecognizer?.startListening(speechIntent)
+                } catch (e: Exception) {
+                    isListening = false
+                    Toast.makeText(context, "Error starting voice recognition: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Toast.makeText(context, "Audio recording permission is required for voice input.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
+    val speechListener = remember {
+        object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                isListening = false
+            }
+            override fun onError(error: Int) {
+                isListening = false
+                val errorMsg = when (error) {
+                    SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+                    SpeechRecognizer.ERROR_CLIENT -> "Client side error"
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
+                    SpeechRecognizer.ERROR_NETWORK -> "Network error"
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No match found"
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition engine busy"
+                    SpeechRecognizer.ERROR_SERVER -> "Server error"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
+                    else -> "Voice recognition error"
+                }
+                if (error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+                }
+            }
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val text = matches[0]
+                    textInput = if (textInput.isBlank()) text else if (textInput.endsWith(" ")) "$textInput$text" else "$textInput $text"
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        }
+    }
+
+    DisposableEffect(context) {
+        val recognizer = if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(speechListener)
+            }
+        } else null
+        speechRecognizer = recognizer
+
+        onDispose {
+            recognizer?.destroy()
+        }
+    }
+
+    fun toggleListening() {
+        if (isListening) {
+            speechRecognizer?.stopListening()
+            isListening = false
+        } else {
+            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+            if (hasPermission) {
+                try {
+                    speechRecognizer?.startListening(speechIntent)
+                    isListening = true
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error starting voice recognition: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
 
     val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -372,6 +483,57 @@ fun ChatScreen(
                                         tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
                                         modifier = Modifier.size(20.dp)
                                     )
+                                }
+
+                                // Glowing pulsing offline Mic Voice Input button
+                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                val pulseScale by infiniteTransition.animateFloat(
+                                    initialValue = 1.0f,
+                                    targetValue = 1.3f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1000, easing = FastOutSlowInEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "pulseScale"
+                                )
+                                val pulseAlpha by infiniteTransition.animateFloat(
+                                    initialValue = 0.6f,
+                                    targetValue = 0f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1000, easing = FastOutSlowInEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "pulseAlpha"
+                                )
+
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    if (isListening) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .graphicsLayer {
+                                                    scaleX = pulseScale
+                                                    scaleY = pulseScale
+                                                    alpha = pulseAlpha
+                                                }
+                                                .background(Color(0xFFEF4444), shape = CircleShape)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { toggleListening() },
+                                        enabled = !uiState.isGenerating,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Mic,
+                                            contentDescription = if (isListening) "Stop Listening" else "Voice Input",
+                                            tint = if (isListening) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                             
