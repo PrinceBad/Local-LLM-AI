@@ -87,7 +87,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 Grab the latest compiled APKs from the [GitHub releases page](https://github.com/PrinceBad/Local-LLM-AI/releases/latest).
 
-The release APK (`app-release-unsigned.apk`) is optimized for mobile hardware using on-device GPU (Vulkan) or CPU.
+The release APK (`app-release.apk`) is optimized for mobile hardware using on-device GPU (Vulkan) or CPU.
 
 ---
 
