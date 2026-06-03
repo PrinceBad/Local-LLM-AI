@@ -108,8 +108,17 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support.",
             sizeLabel = "1.5 GB",
             ramRequirement = "6 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/Gemma4-E2B-Instruct-LiteRT/resolve/main/gemma4_e2b_instruct_q8.litert",
+            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
             fileName = "gemma4-e2b.task"
+        ),
+        PresetModel(
+            id = "gemma4-e4b",
+            name = "Gemma 4 E4B Instruct (Google)",
+            description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support.",
+            sizeLabel = "2.8 GB",
+            ramRequirement = "8 GB+ RAM",
+            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
+            fileName = "gemma4-e4b.task"
         ),
         PresetModel(
             id = "qwen-1.5b",
@@ -620,7 +629,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 if (msg.isUser) {
                     val prefix = when {
                         // Skip OCR context injection for Gemma 4 native multimodal vision model to let it analyze natively
-                        msg.ocrText != null && activeModel != "gemma4-e2b" -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
+                        msg.ocrText != null && activeModel != "gemma4-e2b" && activeModel != "gemma4-e4b" -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
                         else -> ""
                     }
                     "User: $prefix${msg.content}"
@@ -631,7 +640,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val fullPrompt = "$systemHeader$history\nAI: "
 
             // Extract bitmap natively if a vision-capable model is loaded and image is attached
-            val imageBitmap: Bitmap? = if (imageUri != null && activeModel == "gemma4-e2b") {
+            val imageBitmap: Bitmap? = if (imageUri != null && (activeModel == "gemma4-e2b" || activeModel == "gemma4-e4b")) {
                 try {
                     val context = getApplication<Application>().applicationContext
                     context.contentResolver.openInputStream(Uri.parse(imageUri))?.use { stream ->
