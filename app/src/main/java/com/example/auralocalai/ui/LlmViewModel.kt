@@ -1,4 +1,4 @@
-package com.example.auralocalai.ui
+﻿package com.example.auralocalai.ui
 
 import android.app.Application
 import android.os.Build
@@ -257,49 +257,26 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        val tempFileName = "$fileName.tmp"
-        val tempFile = File(storageDir, tempFileName)
+          val tempFile = File(storageDir, "$fileName.tmp")
         val destFile = File(storageDir, fileName)
-
-        // Delete any leftover temp files first
-        if (tempFile.exists()) {
-            tempFile.delete()
-        }
+        // Note: do NOT pre-delete tempFile - ModelDownloader supports resuming partial downloads
 
         downloadJob = viewModelScope.launch {
-            downloader.downloadModel(url, tempFile).collect { state ->
+            // Download directly to destFile - ModelDownloader handles resume automatically
+            downloader.downloadModel(url, destFile).collect { state ->
                 _uiState.update { it.copy(downloadState = state) }
                 if (state is DownloadState.Success) {
-                    var renameSuccess = false
-                    try {
-                        if (tempFile.exists()) {
-                            renameSuccess = tempFile.renameTo(destFile)
-                        }
-                    } catch (e: Exception) {
-                        renameSuccess = false
+                    _uiState.update { 
+                        it.copy(
+                            currentDownloadingModelId = null,
+                            downloadState = DownloadState.Idle
+                        )
                     }
-
-                    if (renameSuccess) {
-                        _uiState.update { 
-                            it.copy(
-                                currentDownloadingModelId = null,
-                                downloadState = DownloadState.Idle
-                            )
-                        }
-                        refreshDownloadedModels()
-                        // Auto load the newly downloaded model
-                        loadModel(fileName, modelId)
-                    } else {
-                        if (tempFile.exists()) tempFile.delete()
-                        _uiState.update {
-                            it.copy(
-                                currentDownloadingModelId = null,
-                                downloadState = DownloadState.Error("Failed to rename completed model download")
-                            )
-                        }
-                    }
+                    refreshDownloadedModels()
+                    // Auto-load the newly downloaded model
+                    loadModel(fileName, modelId)
                 } else if (state is DownloadState.Error) {
-                    if (tempFile.exists()) tempFile.delete()
+                    // Partial file is preserved for resume on next tap
                     _uiState.update {
                         it.copy(
                             currentDownloadingModelId = null
@@ -337,12 +314,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelDownload() {
         downloadJob?.cancel()
-        try {
-            val files = storageDir.listFiles() ?: emptyArray()
-            files.filter { it.isFile && it.name.endsWith(".tmp") }.forEach { it.delete() }
-        } catch (e: Exception) {
-            // Ignore clean up errors
-        }
+        // Do NOT delete partial files - they are preserved for resume on next Download tap
         _uiState.update { 
             it.copy(
                 downloadState = DownloadState.Idle,
@@ -708,3 +680,4 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         inferenceEngine.close()
     }
 }
+

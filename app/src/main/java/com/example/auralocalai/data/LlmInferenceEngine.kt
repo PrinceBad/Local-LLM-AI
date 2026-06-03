@@ -35,18 +35,16 @@ class LlmInferenceEngine(private val context: Context) {
                 return@withContext Result.failure(Exception("Model file does not exist at: $modelPath"))
             }
 
-            // Check for minimum size to prevent loading incomplete or corrupted files
-            val minSize = when {
-                modelFile.name.contains("qwen3-0.6b") -> 500_000_000L
-                modelFile.name.contains("qwen-1.5b") 
-                    || modelFile.name.contains("deepseek-r1") 
-                    || modelFile.name.contains("gemma-2b") 
-                    || modelFile.name.contains("phi-2")
-                    || modelFile.name.contains("gemma4-e2b") -> 1_000_000_000L
-                else -> 10_000_000L
-            }
+            // Check for minimum size to prevent loading incomplete or corrupted files.
+            // Use a universal 50 MB floor - any legitimate LiteRT model is larger than this.
+            // Per-model thresholds were too brittle and could be bypassed by filename changes.
+            val minSize = 50_000_000L // 50 MB universal minimum
             if (modelFile.length() < minSize) {
-                return@withContext Result.failure(Exception("Model file is incomplete or corrupted (Size is only ${modelFile.length() / (1024 * 1024)} MB). Please delete and re-download the model."))
+                return@withContext Result.failure(Exception(
+                    "Model file is incomplete or corrupted " +
+                    "(${modelFile.length() / (1024 * 1024)} MB is below the 50 MB minimum). " +
+                    "Please delete and re-download the model."
+                ))
             }
 
             val isEmulator = Build.FINGERPRINT.startsWith("generic")
@@ -80,8 +78,9 @@ class LlmInferenceEngine(private val context: Context) {
             llmInference = LlmInference.createFromOptions(context, options)
             currentModelPath = modelPath
             Result.success(Unit)
-        } catch (e: Exception) {
-            // If GPU creation fails, try falling back to CPU
+        } catch (e: Throwable) {
+            // Catch Throwable (not just Exception) to handle native JNI crashes from GPU backend.
+            // If GPU creation fails, fall back to CPU.
             try {
                 val fallbackOptions = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelPath)
@@ -91,7 +90,7 @@ class LlmInferenceEngine(private val context: Context) {
                 llmInference = LlmInference.createFromOptions(context, fallbackOptions)
                 currentModelPath = modelPath
                 Result.success(Unit)
-            } catch (fallbackEx: Exception) {
+            } catch (fallbackEx: Throwable) {
                 Result.failure(Exception("Failed to load model on GPU/CPU: ${fallbackEx.localizedMessage}", fallbackEx))
             }
         }
