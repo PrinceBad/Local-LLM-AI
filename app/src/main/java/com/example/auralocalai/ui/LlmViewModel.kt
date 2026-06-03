@@ -155,6 +155,15 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             ramRequirement = "8 GB+ RAM",
             downloadUrl = "https://huggingface.co/siddhantchalke/phi2-cpu-mediapipe-llm-inference/resolve/main/phi2_cpu.bin",
             fileName = "phi-2.task"
+        ),
+        PresetModel(
+            id = "phi4-mini",
+            name = "Phi-4 Mini 3.8B Instruct (Microsoft)",
+            description = "Microsoft's latest compact powerhouse. 3.8B params with advanced reasoning, math, multilingual support, and function calling. Major upgrade over Phi-2.",
+            sizeLabel = "4.2 GB",
+            ramRequirement = "8 GB+ RAM",
+            downloadUrl = "https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task",
+            fileName = "phi4-mini.task"
         )
     )
 
