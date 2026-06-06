@@ -47,28 +47,53 @@ data class ModelPreset(
                 expectedExtension = ".task",
                 backendRestriction = LlmBackendRestriction.ANY
             ),
-            ModelPreset(
-                id = "gemma2-2b",
-                name = "Google Gemma 2 2B IT",
-                description = "Google's highly optimized on-device LLM. Excellent logic, reasoning, and conversational capabilities.",
-                sizeLabel = "1.6 GB",
-                ramRequirement = "6 GB+ RAM",
-                downloadUrl = "https://huggingface.co/litert-community/Gemma2-2B-IT/resolve/main/gemma2_q8_multi-prefill-seq_ekv1280.task",
-                fileName = "gemma2-2b.task",
+            
+                        ModelPreset(
+                id = "qwen-0.5b",
+                name = "Qwen 2.5 0.5B Instruct",
+                description = "Alibaba's ultra-lightweight fast LLM.",
+                sizeLabel = "0.6 GB",
+                ramRequirement = "4 GB+ RAM",
+                downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task",
+                fileName = "qwen-0.5b.task",
                 requiresHfToken = false,
                 expectedExtension = ".task",
                 backendRestriction = LlmBackendRestriction.ANY
             ),
             ModelPreset(
+                id = "qwen3-4b",
+                name = "Qwen 3 4B",
+                description = "Alibaba's latest powerful Qwen 3 architecture with 4 billion parameters.",
+                sizeLabel = "2.8 GB",
+                ramRequirement = "8 GB+ RAM",
+                downloadUrl = "https://huggingface.co/litert-community/Qwen3-4B/resolve/main/qwen3_4b_mixed_int4.litertlm",
+                fileName = "qwen3-4b.litertlm",
+                requiresHfToken = false,
+                expectedExtension = ".litertlm",
+                backendRestriction = LlmBackendRestriction.ANY
+            ),
+            ModelPreset(
+                id = "qwen2.5-coder-3b",
+                name = "Qwen 2.5 Coder 3B Instruct",
+                description = "Alibaba's fast and highly capable coding-specialized LLM with 3 billion parameters.",
+                sizeLabel = "2.0 GB",
+                ramRequirement = "6 GB+ RAM",
+                downloadUrl = "https://huggingface.co/4ntoine/Qwen2.5-Coder-3B-Instruct-LiteRTLM/resolve/main/model.litertlm",
+                fileName = "qwen2.5-coder-3b.litertlm",
+                requiresHfToken = false,
+                expectedExtension = ".litertlm",
+                backendRestriction = LlmBackendRestriction.ANY
+            ),
+ModelPreset(
                 id = "gemma4-e2b",
                 name = "Google Gemma 4 E2B Instruct (Multimodal)",
                 description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support.",
                 sizeLabel = "1.5 GB",
                 ramRequirement = "6 GB+ RAM",
-                downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
-                fileName = "gemma4-e2b.task",
+                downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+                fileName = "gemma4-e2b.litertlm",
                 requiresHfToken = false,
-                expectedExtension = ".task",
+                expectedExtension = ".litertlm",
                 backendRestriction = LlmBackendRestriction.ANY
             ),
             ModelPreset(
@@ -77,10 +102,10 @@ data class ModelPreset(
                 description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support.",
                 sizeLabel = "2.8 GB",
                 ramRequirement = "8 GB+ RAM",
-                downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
-                fileName = "gemma4-e4b.task",
+                downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
+                fileName = "gemma4-e4b.litertlm",
                 requiresHfToken = false,
-                expectedExtension = ".task",
+                expectedExtension = ".litertlm",
                 backendRestriction = LlmBackendRestriction.ANY
             )
         )
@@ -88,15 +113,34 @@ data class ModelPreset(
 }
 
 fun isValidModelFile(file: File): Boolean {
-    if (!file.exists() || file.length() == 0L) return false
+    if (!file.exists() || file.length() < 8L) return false
     return try {
-        ZipFile(file).use { zip ->
-            zip.entries().asSequence().any {
-                it.name.endsWith(".tflite") || 
-                it.name.endsWith(".litert") || 
-                it.name.endsWith(".bin")
-            }
-        }
+        val bytes = ByteArray(8)
+        java.io.FileInputStream(file).use { it.read(bytes) }
+
+        // Standard ZIP archive (MediaPipe Task)
+        val isZip = bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() &&
+                    bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
+        
+        // Offset ZIP (Some HuggingFace hosted .task files prepend 4 zero bytes)
+        val isOffsetZip = bytes[4] == 'P'.code.toByte() && bytes[5] == 'K'.code.toByte() &&
+                          bytes[6] == 0x03.toByte() && bytes[7] == 0x04.toByte()
+
+        // RAW TFLite Flatbuffer
+        val isTfliteDirect = bytes[0] == 'T'.code.toByte() && bytes[1] == 'F'.code.toByte() &&
+                             bytes[2] == 'L'.code.toByte() && bytes[3] == '3'.code.toByte()
+
+        // Offset RAW TFLite Flatbuffer
+        val isTfliteOffset = bytes[4] == 'T'.code.toByte() && bytes[5] == 'F'.code.toByte() &&
+                             bytes[6] == 'L'.code.toByte() && bytes[7] == '3'.code.toByte()
+
+        // LITERTLM Bundle format ('LITERTLM' at offset 0)
+        val isLitertlm = bytes[0] == 'L'.code.toByte() && bytes[1] == 'I'.code.toByte() &&
+                         bytes[2] == 'T'.code.toByte() && bytes[3] == 'E'.code.toByte() &&
+                         bytes[4] == 'R'.code.toByte() && bytes[5] == 'T'.code.toByte() &&
+                         bytes[6] == 'L'.code.toByte() && bytes[7] == 'M'.code.toByte()
+
+        isZip || isOffsetZip || isTfliteDirect || isTfliteOffset || isLitertlm
     } catch (e: Exception) {
         false
     }
