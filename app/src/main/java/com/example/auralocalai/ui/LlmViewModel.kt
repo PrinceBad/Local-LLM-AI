@@ -723,15 +723,27 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
             var accumulatedText = ""
+            var lastUpdateTime = System.currentTimeMillis()
             inferenceEngine.generateResponse(fullPrompt, imageBitmap).collect { partialToken ->
                 accumulatedText += partialToken
-                _uiState.update { state ->
-                    val updatedMessages = state.messages.toMutableList()
-                    if (updatedMessages.isNotEmpty()) {
-                        updatedMessages[updatedMessages.lastIndex] = ChatMessage(accumulatedText, isUser = false)
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastUpdateTime > 50) {
+                    _uiState.update { state ->
+                        val updatedMessages = state.messages.toMutableList()
+                        if (updatedMessages.isNotEmpty()) {
+                            updatedMessages[updatedMessages.lastIndex] = ChatMessage(accumulatedText, isUser = false)
+                        }
+                        state.copy(messages = updatedMessages)
                     }
-                    state.copy(messages = updatedMessages)
+                    lastUpdateTime = currentTime
                 }
+            }
+            _uiState.update { state ->
+                val updatedMessages = state.messages.toMutableList()
+                if (updatedMessages.isNotEmpty()) {
+                    updatedMessages[updatedMessages.lastIndex] = ChatMessage(accumulatedText, isUser = false)
+                }
+                state.copy(messages = updatedMessages)
             }
             
             _uiState.update { it.copy(isGenerating = false) }
