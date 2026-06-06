@@ -15,7 +15,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "ModelDownloader"
-private const val DEFAULT_BUFFER_SIZE_BYTES = 65536 // 64 KB
+private const val DEFAULT_BUFFER_SIZE_BYTES = 524288 // 512 KB
 
 sealed interface DownloadState {
     data object Idle : DownloadState
