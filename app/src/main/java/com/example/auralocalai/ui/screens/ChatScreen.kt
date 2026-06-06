@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayCircle
@@ -65,6 +66,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 fun ChatScreen(
     viewModel: LlmViewModel,
     onNavigateToModelManager: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -261,6 +263,16 @@ fun ChatScreen(
                                     tint = MaterialTheme.colorScheme.error
                                 )
                             }
+                        }
+                        IconButton(
+                            onClick = onNavigateToSettings,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VpnKey,
+                                contentDescription = "App Settings",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                         IconButton(
                             onClick = onNavigateToModelManager,

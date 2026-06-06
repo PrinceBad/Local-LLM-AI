@@ -14,6 +14,10 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+    }
+
     enableEdgeToEdge()
     setContent {
       AuraLocalAITheme { Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { MainNavigation() } }

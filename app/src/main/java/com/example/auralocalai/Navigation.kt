@@ -10,6 +10,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.example.auralocalai.ui.LlmViewModel
 import com.example.auralocalai.ui.screens.ChatScreen
 import com.example.auralocalai.ui.screens.ModelManagerScreen
+import com.example.auralocalai.ui.screens.SettingsScreen
 
 @Composable
 fun MainNavigation() {
@@ -26,11 +27,19 @@ fun MainNavigation() {
           ChatScreen(
               viewModel = llmViewModel,
               onNavigateToModelManager = { backStack.add(ModelManager) },
+              onNavigateToSettings = { backStack.add(Settings) },
               modifier = Modifier.fillMaxSize()
           )
         }
         entry<ModelManager> {
           ModelManagerScreen(
+              viewModel = llmViewModel,
+              onBack = { backStack.removeLastOrNull() },
+              modifier = Modifier.fillMaxSize()
+          )
+        }
+        entry<Settings> {
+          SettingsScreen(
               viewModel = llmViewModel,
               onBack = { backStack.removeLastOrNull() },
               modifier = Modifier.fillMaxSize()

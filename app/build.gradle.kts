@@ -89,7 +89,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 
   // MediaPipe Tasks GenAI for local LLM inference
-  implementation("com.google.mediapipe:tasks-genai:0.10.35")
+  implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
   implementation("androidx.compose.material:material-icons-core")
   implementation("androidx.compose.material:material-icons-extended")
 

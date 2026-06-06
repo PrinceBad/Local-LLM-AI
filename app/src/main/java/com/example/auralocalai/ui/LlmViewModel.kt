@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.ui
+package com.example.auralocalai.ui
 
 import android.app.Application
 import android.os.Build
@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.auralocalai.data.DownloadState
 import com.example.auralocalai.data.LlmInferenceEngine
 import com.example.auralocalai.data.ModelDownloader
+import com.example.auralocalai.data.ModelPreset
+import com.example.auralocalai.data.LlmBackendRestriction
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +17,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import android.content.Context
+import android.content.Intent
+import com.example.auralocalai.data.ModelDownloadService
+import com.example.auralocalai.data.ServiceDownloadState
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.graphics.Bitmap
@@ -28,7 +33,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.builtins.ListSerializer
+import android.util.Log
 
+@Serializable
 data class ChatMessage(
     val content: String,
     val isUser: Boolean,
@@ -39,16 +49,6 @@ data class ChatMessage(
     val fileUri: String? = null,
     val fileName: String? = null,
     val fileType: String? = null
-)
-
-data class PresetModel(
-    val id: String,
-    val name: String,
-    val description: String,
-    val sizeLabel: String,
-    val ramRequirement: String,
-    val downloadUrl: String,
-    val fileName: String
 )
 
 sealed interface ModelState {
@@ -73,12 +73,38 @@ data class UiState(
     val selectedFileType: String? = null,
     val extractedOcrText: String? = null,
     val isAttachmentProcessing: Boolean = false,
-    val attachmentError: String? = null
+    val attachmentError: String? = null,
+    val hfToken: String = ""
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(UiState())
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val historyFile = File(application.filesDir, "chat_history.json")
+
+    private fun saveMessages(messages: List<ChatMessage>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val jsonString = json.encodeToString(ListSerializer(ChatMessage.serializer()), messages)
+                historyFile.writeText(jsonString)
+            } catch (e: Exception) {
+                Log.e("LlmViewModel", "Failed to save chat history", e)
+            }
+        }
+    }
+
+    private fun loadMessages(): List<ChatMessage> {
+        if (!historyFile.exists()) return emptyList()
+        return try {
+            val jsonString = historyFile.readText()
+            json.decodeFromString(ListSerializer(ChatMessage.serializer()), jsonString)
+        } catch (e: Exception) {
+            Log.e("LlmViewModel", "Failed to load chat history", e)
+            emptyList()
+        }
+    }
+
+    private val _uiState = MutableStateFlow(UiState(messages = loadMessages()))
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     private val downloader = ModelDownloader()
@@ -91,81 +117,6 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     private var downloadJob: Job? = null
     private var inferenceJob: Job? = null
-
-    val presets = listOf(
-        PresetModel(
-            id = "qwen3-0.6b",
-            name = "Qwen 3 0.6B Instruct (Alibaba)",
-            description = "Alibaba's ultra-lightweight mobile LLM. Exceptional speed, low memory footprint, and perfect context intent understanding.",
-            sizeLabel = "620 MB",
-            ramRequirement = "4 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-Instruct-LiteRT/resolve/main/qwen3_0.6b_instruct_q8.litert",
-            fileName = "qwen3-0.6b.task"
-        ),
-        PresetModel(
-            id = "gemma4-e2b",
-            name = "Gemma 4 E2B Instruct (Google)",
-            description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support.",
-            sizeLabel = "1.5 GB",
-            ramRequirement = "6 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.task",
-            fileName = "gemma4-e2b.task"
-        ),
-        PresetModel(
-            id = "gemma4-e4b",
-            name = "Gemma 4 E4B Instruct (Google)",
-            description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support.",
-            sizeLabel = "2.8 GB",
-            ramRequirement = "8 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task",
-            fileName = "gemma4-e4b.task"
-        ),
-        PresetModel(
-            id = "qwen-1.5b",
-            name = "Qwen 2.5 1.5B Instruct (Alibaba)",
-            description = "Alibaba's state-of-the-art multilingual LLM. Outperforms models of similar size in math, coding, and general knowledge.",
-            sizeLabel = "1.6 GB",
-            ramRequirement = "6 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
-            fileName = "qwen-1.5b.task"
-        ),
-        PresetModel(
-            id = "deepseek-1.5b",
-            name = "DeepSeek-R1 Distill Qwen 1.5B",
-            description = "DeepSeek's powerful reasoning model distilled into Qwen architecture, outputting detailed chain-of-thought logic.",
-            sizeLabel = "1.6 GB",
-            ramRequirement = "6 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task",
-            fileName = "deepseek-r1.task"
-        ),
-        PresetModel(
-            id = "gemma-2b",
-            name = "Gemma 1.1 2B IT (Google)",
-            description = "Google's optimized mobile LLM. Highly responsive and custom-tuned for standard mobile workloads and general Q&A.",
-            sizeLabel = "1.4 GB",
-            ramRequirement = "8 GB+ RAM",
-            downloadUrl = "https://huggingface.co/metsman/gemma-2b-it-cpu-int4-org/resolve/main/gemma-2b-it-cpu-int4.bin",
-            fileName = "gemma-2b-it.task"
-        ),
-        PresetModel(
-            id = "phi-2",
-            name = "Phi-2 2.7B (Microsoft)",
-            description = "Microsoft's lightweight model. Excellent at processing logic, math calculations, and code snippets.",
-            sizeLabel = "1.6 GB",
-            ramRequirement = "8 GB+ RAM",
-            downloadUrl = "https://huggingface.co/siddhantchalke/phi2-cpu-mediapipe-llm-inference/resolve/main/phi2_cpu.bin",
-            fileName = "phi-2.task"
-        ),
-        PresetModel(
-            id = "phi4-mini",
-            name = "Phi-4 Mini 3.8B Instruct (Microsoft)",
-            description = "Microsoft's latest compact powerhouse. 3.8B params with advanced reasoning, math, multilingual support, and function calling. Major upgrade over Phi-2.",
-            sizeLabel = "4.2 GB",
-            ramRequirement = "8 GB+ RAM",
-            downloadUrl = "https://huggingface.co/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.task",
-            fileName = "phi4-mini.task"
-        )
-    )
 
     private fun migrateExistingModels() {
         val targetDir = storageDir
@@ -212,6 +163,53 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     init {
         migrateExistingModels()
         refreshDownloadedModels()
+
+        // Initialize hfToken from SharedPreferences
+        val prefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        val initialHfToken = prefs.getString("hf_token", "") ?: ""
+        _uiState.update { it.copy(hfToken = initialHfToken) }
+
+        viewModelScope.launch {
+            ModelDownloadService.downloadState.collect { state ->
+                when (state) {
+                    is ServiceDownloadState.Idle -> {
+                        _uiState.update { it.copy(downloadState = DownloadState.Idle) }
+                    }
+                    is ServiceDownloadState.Progress -> {
+                        _uiState.update {
+                            it.copy(
+                                currentDownloadingModelId = state.modelId,
+                                downloadState = DownloadState.Progress(
+                                    bytesDownloaded = state.bytesDownloaded,
+                                    totalBytes = state.totalBytes,
+                                    percentage = state.percentage,
+                                    speedBytesPerSec = state.speedBytesPerSec,
+                                    etaSeconds = state.etaSeconds
+                                )
+                            )
+                        }
+                    }
+                    is ServiceDownloadState.Success -> {
+                        _uiState.update {
+                            it.copy(
+                                currentDownloadingModelId = null,
+                                downloadState = DownloadState.Idle
+                            )
+                        }
+                        refreshDownloadedModels()
+                        loadModel(state.fileName, state.modelId)
+                    }
+                    is ServiceDownloadState.Error -> {
+                        _uiState.update {
+                            it.copy(
+                                currentDownloadingModelId = null,
+                                downloadState = DownloadState.Error(state.message)
+                            )
+                        }
+                    }
+                }
+            }
+        }
         
         // Auto-load the first available downloaded model (skip on emulators/x86 to prevent error popups on startup)
         val isEmulator = Build.FINGERPRINT.startsWith("generic")
@@ -235,7 +233,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 val firstDownloaded = uiState.value.localModels.firstOrNull()
                 if (firstDownloaded != null) {
-                    val matchingPreset = presets.firstOrNull { it.fileName == firstDownloaded }
+                    val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == firstDownloaded }
                     val modelName = matchingPreset?.name ?: firstDownloaded
                     val modelId = matchingPreset?.id ?: firstDownloaded
                     
@@ -262,7 +260,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(localModels = localFiles) }
     }
 
-    fun downloadModel(preset: PresetModel) {
+    fun downloadModel(preset: ModelPreset) {
         downloadModelFromUrl(preset.downloadUrl, preset.fileName, preset.id)
     }
 
@@ -279,29 +277,21 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val destFile = File(storageDir, fileName)
         // Note: do NOT pre-delete tempFile - ModelDownloader supports resuming partial downloads
 
-        downloadJob = viewModelScope.launch {
-            // Download directly to destFile - ModelDownloader handles resume automatically
-            downloader.downloadModel(url, destFile).collect { state ->
-                _uiState.update { it.copy(downloadState = state) }
-                if (state is DownloadState.Success) {
-                    _uiState.update { 
-                        it.copy(
-                            currentDownloadingModelId = null,
-                            downloadState = DownloadState.Idle
-                        )
-                    }
-                    refreshDownloadedModels()
-                    // Auto-load the newly downloaded model
-                    loadModel(fileName, modelId)
-                } else if (state is DownloadState.Error) {
-                    // Partial file is preserved for resume on next tap
-                    _uiState.update {
-                        it.copy(
-                            currentDownloadingModelId = null
-                        )
-                    }
-                }
-            }
+        val context = getApplication<Application>().applicationContext
+        // Read HF token from SharedPreferences (set by user in Settings)
+        val prefs = context.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE)
+        val hfToken = prefs.getString("hf_token", "") ?: ""
+
+        val intent = Intent(context, ModelDownloadService::class.java).apply {
+            putExtra("url", url)
+            putExtra("fileName", fileName)
+            putExtra("modelId", modelId)
+            putExtra("hfToken", hfToken)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
         }
     }
 
@@ -312,7 +302,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 if (file.exists()) {
                     file.delete()
                 }
-                val matchingPreset = presets.firstOrNull { it.fileName == fileName }
+                val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == fileName }
                 val presetId = matchingPreset?.id ?: fileName
                 if (uiState.value.activeModelId == presetId) {
                     inferenceEngine.close()
@@ -330,9 +320,39 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun saveHfToken(token: String) {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("hf_token", token).apply()
+        _uiState.update { it.copy(hfToken = token) }
+    }
+
+    fun clearHfToken() {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().remove("hf_token").apply()
+        _uiState.update { it.copy(hfToken = "") }
+    }
+
+    fun validateHfToken(token: String, callback: (Boolean, String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val testUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task"
+                val result = downloader.validateTokenAccess(testUrl, token)
+                if (result == "OK") {
+                    callback(true, "Token is valid!")
+                } else {
+                    callback(false, result)
+                }
+            } catch (e: Exception) {
+                callback(false, "Validation failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
     fun cancelDownload() {
-        downloadJob?.cancel()
-        // Do NOT delete partial files - they are preserved for resume on next Download tap
+        val context = getApplication<Application>().applicationContext
+        context.stopService(Intent(context, ModelDownloadService::class.java))
         _uiState.update { 
             it.copy(
                 downloadState = DownloadState.Idle,
@@ -344,7 +364,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     fun loadModel(fileName: String, modelId: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(modelState = ModelState.Loading) }
-            val matchingPreset = presets.firstOrNull { it.id == modelId }
+            val matchingPreset = ModelPreset.presets.firstOrNull { it.id == modelId }
             val displayName = matchingPreset?.name ?: fileName
 
             val result = inferenceEngine.loadModel(File(storageDir, fileName).absolutePath)
@@ -628,6 +648,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 isGenerating = true
             )
         }
+        saveMessages(currentMessages)
 
         inferenceJob = viewModelScope.launch {
             val systemHeader = "System: You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise.\n\n"
@@ -678,6 +699,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             _uiState.update { it.copy(isGenerating = false) }
+            saveMessages(_uiState.value.messages)
         }
     }
 
@@ -689,11 +711,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 isGenerating = false
             )
         }
+        saveMessages(emptyList())
     }
 
     override fun onCleared() {
         super.onCleared()
-        downloadJob?.cancel()
+        val context = getApplication<Application>().applicationContext
+        context.stopService(Intent(context, ModelDownloadService::class.java))
         inferenceJob?.cancel()
         inferenceEngine.close()
     }

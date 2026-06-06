@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.auralocalai.data.DownloadState
 import com.example.auralocalai.ui.LlmViewModel
 import com.example.auralocalai.ui.ModelState
-import com.example.auralocalai.ui.PresetModel
+import com.example.auralocalai.data.ModelPreset
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,7 +41,8 @@ fun ModelManagerScreen(
     var customUrl by remember { mutableStateOf("") }
     var customFileName by remember { mutableStateOf("model.task") }
     var isCustomExpanded by remember { mutableStateOf(false) }
-
+    var modelToDelete by remember { mutableStateOf<ModelPreset?>(null) }
+ 
     Scaffold(
         topBar = {
             Column {
@@ -54,7 +55,7 @@ fun ModelManagerScreen(
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                 )
-                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
             }
         },
         containerColor = MaterialTheme.colorScheme.background,
@@ -71,8 +72,8 @@ fun ModelManagerScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
-                    border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
@@ -90,6 +91,30 @@ fun ModelManagerScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 18.sp
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val isHfConfigured = uiState.hfToken.isNotBlank()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        if (isHfConfigured) MaterialTheme.colorScheme.tertiaryContainer 
+                                        else MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (isHfConfigured) "🔑 HF Token: Configured ✓" else "⚠ HF Token: Not Configured",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isHfConfigured) MaterialTheme.colorScheme.onTertiaryContainer
+                                            else MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -106,7 +131,7 @@ fun ModelManagerScreen(
             }
 
             // Recommended Presets List
-            items(viewModel.presets) { preset ->
+            items(ModelPreset.presets) { preset ->
                 val isDownloaded = uiState.localModels.contains(preset.fileName)
                 val isActive = uiState.activeModelId == preset.id
                 val isDownloading = uiState.currentDownloadingModelId == preset.id
@@ -121,7 +146,7 @@ fun ModelManagerScreen(
                     onDownload = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
                     onCancel = { viewModel.cancelDownload() },
-                    onDelete = { viewModel.deleteModel(preset.fileName) }
+                    onDelete = { modelToDelete = preset }
                 )
             }
 
@@ -220,11 +245,35 @@ fun ModelManagerScreen(
             }
         }
     }
+
+    if (modelToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { modelToDelete = null },
+            title = { Text("Delete Local Model?", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to permanently delete '${modelToDelete?.name}'? This will free up approximately ${modelToDelete?.sizeLabel} of storage space.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        modelToDelete?.let { viewModel.deleteModel(it.fileName) }
+                        modelToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { modelToDelete = null }) {
+                    Text("Cancel", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun PresetModelCard(
-    preset: PresetModel,
+    preset: ModelPreset,
     isDownloaded: Boolean,
     isActive: Boolean,
     isDownloading: Boolean,
@@ -241,7 +290,7 @@ fun PresetModelCard(
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(
             width = if (isActive) 1.5.dp else 1.dp,
-            color = if (isActive) MaterialTheme.colorScheme.primary else Color(0xFFE2E8F0)
+            color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
         ),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -269,14 +318,14 @@ fun PresetModelCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFEFF6FF))
+                                .background(MaterialTheme.colorScheme.primaryContainer)
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "Size: ${preset.sizeLabel}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1E40AF)
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
 
@@ -284,14 +333,14 @@ fun PresetModelCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFF5F3FF))
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "RAM: ${preset.ramRequirement}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF5B21B6)
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
                     }
@@ -301,7 +350,7 @@ fun PresetModelCard(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFD1FAE5))
+                            .background(MaterialTheme.colorScheme.tertiaryContainer)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Row(
@@ -311,14 +360,14 @@ fun PresetModelCard(
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "Active",
-                                tint = Color(0xFF065F46),
+                                tint = MaterialTheme.colorScheme.tertiary,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = "ACTIVE",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF065F46)
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
                             )
                         }
                     }
@@ -425,8 +474,8 @@ fun DownloadProgressPanel(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFFF8FAFC))
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
             .padding(14.dp)
     ) {
         when (state) {
@@ -447,7 +496,7 @@ fun DownloadProgressPanel(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Downloading: %",
+                        text = "Downloading: ${state.percentage}%",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.secondary
@@ -467,7 +516,7 @@ fun DownloadProgressPanel(
                         .padding(vertical = 8.dp)
                         .clip(RoundedCornerShape(4.dp)),
                     color = MaterialTheme.colorScheme.secondary,
-                    trackColor = Color(0xFFE2E8F0)
+                    trackColor = MaterialTheme.colorScheme.outlineVariant
                 )
 
                 Row(
