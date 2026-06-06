@@ -268,7 +268,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshDownloadedModels() {
         val files = storageDir.listFiles() ?: emptyArray()
-        val localFiles = files.filter { it.isFile && (it.name.endsWith(".task") || it.name.endsWith(".bin")) }.map { it.name }
+        val localFiles = files.filter { it.isFile && it.name.endsWith(".task") }.map { it.name }
         _uiState.update { it.copy(localModels = localFiles) }
     }
 
