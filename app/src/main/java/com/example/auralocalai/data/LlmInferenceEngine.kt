@@ -112,9 +112,10 @@ class LlmInferenceEngine(private val context: Context) {
                     }
 
                     try {
+                        val threadCount = if (Runtime.getRuntime().availableProcessors() >= 8) 4 else 2
                         val config = EngineConfig(
                             modelPath = modelPath,
-                            backend = Backend.CPU()
+                            backend = Backend.CPU(threadCount)
                         )
                         val newEngine = Engine(config)
                         newEngine.initialize()
