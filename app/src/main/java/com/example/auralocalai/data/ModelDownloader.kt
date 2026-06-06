@@ -43,7 +43,8 @@ class ModelDownloader {
                 readTimeout = 10_000
                 instanceFollowRedirects = false
                 setRequestProperty("User-Agent", "Mozilla/5.0")
-                if (hfToken.isNotBlank() && isHuggingFaceDomain(url.host ?: "")) {
+                val host = url.host ?: ""
+                if (hfToken.isNotBlank() && isHuggingFaceDomain(host) && !isPresignedUrl(url)) {
                     setRequestProperty("Authorization", "Bearer $hfToken")
                 }
             }
@@ -65,13 +66,25 @@ class ModelDownloader {
     }
 
     /**
-     * Returns true if the given hostname is a HuggingFace domain.
-     * Auth headers should ONLY be sent to these domains.
-     * Sending auth to redirect targets (like AWS S3 pre-signed URLs) will cause 403 errors.
+     * Returns true if the given URL is an AWS pre-signed URL.
+     * We should never attach Authorization headers to pre-signed URLs.
+     */
+    private fun isPresignedUrl(url: URL): Boolean {
+        val query = url.query ?: return false
+        return query.contains("Signature=") || 
+               query.contains("X-Amz-Signature=") || 
+               query.contains("AWSAccessKeyId=")
+    }
+
+    /**
+     * Returns true if the given hostname is a core HuggingFace domain.
+     * Auth headers should ONLY be sent to core auth endpoints.
+     * Storage endpoints (like cas-bridge.xethub.hf.co or cdn-lfs.huggingface.co)
+     * are pre-signed and will return 403 if they receive an Authorization header.
      */
     private fun isHuggingFaceDomain(host: String): Boolean {
-        return host == "huggingface.co" || host.endsWith(".huggingface.co") ||
-               host == "hf.co" || host.endsWith(".hf.co")
+        return host == "huggingface.co" || host == "hf.co" || 
+               host == "api-face.huggingface.co" || host == "api.huggingface.co"
     }
 
     /**
@@ -100,9 +113,9 @@ class ModelDownloader {
                 instanceFollowRedirects = false // Manually handle redirects to preserve auth
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
-                // Only send HF token to HuggingFace domains, NOT to S3 redirect targets
+                // Only send HF token to core HuggingFace domains, NOT to pre-signed redirect targets
                 val host = url.host ?: ""
-                if (isHuggingFaceDomain(host) && hfToken.isNotBlank()) {
+                if (isHuggingFaceDomain(host) && !isPresignedUrl(url) && hfToken.isNotBlank()) {
                     setRequestProperty("Authorization", "Bearer $hfToken")
                     Log.d(TAG, "Sending auth header to HF domain: $host")
                 }
