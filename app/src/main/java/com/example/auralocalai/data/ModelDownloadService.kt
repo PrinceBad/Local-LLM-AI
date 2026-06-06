@@ -74,9 +74,10 @@ class ModelDownloadService : Service() {
 
         activeDownloadJob = serviceScope.launch {
             val storageDir = File(getExternalFilesDir(null) ?: filesDir, "models")
+            val tempFile = File(storageDir, "$fileName.tmp")
             val destFile = File(storageDir, fileName)
 
-            downloader.downloadModel(url, destFile, hfToken).collect { state ->
+            downloader.downloadModel(url, tempFile, hfToken).collect { state ->
                 when (state) {
                     is DownloadState.Idle -> {
                         downloadState.value = ServiceDownloadState.Idle
@@ -94,12 +95,33 @@ class ModelDownloadService : Service() {
                         updateProgressNotification(modelId, fileName, state.percentage, state.speedBytesPerSec)
                     }
                     is DownloadState.Success -> {
-                        downloadState.value = ServiceDownloadState.Success(
-                            modelId = modelId,
-                            fileName = fileName,
-                            filePath = state.filePath
-                        )
-                        showCompletionNotification(modelId, fileName, true)
+                        val renameSuccess = try {
+                            if (destFile.exists()) {
+                                destFile.delete()
+                            }
+                            tempFile.renameTo(destFile)
+                        } catch (e: Exception) {
+                            false
+                        }
+
+                        if (renameSuccess) {
+                            downloadState.value = ServiceDownloadState.Success(
+                                modelId = modelId,
+                                fileName = fileName,
+                                filePath = destFile.absolutePath
+                            )
+                            showCompletionNotification(modelId, fileName, true)
+                        } else {
+                            if (tempFile.exists()) {
+                                tempFile.delete()
+                            }
+                            downloadState.value = ServiceDownloadState.Error(
+                                modelId = modelId,
+                                fileName = fileName,
+                                message = "Failed to finalize downloaded model file."
+                            )
+                            showCompletionNotification(modelId, fileName, false)
+                        }
                         stopSelf()
                     }
                     is DownloadState.Error -> {

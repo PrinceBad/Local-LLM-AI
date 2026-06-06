@@ -314,6 +314,10 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 if (file.exists()) {
                     file.delete()
                 }
+                val tempFile = File(storageDir, "$fileName.tmp")
+                if (tempFile.exists()) {
+                    tempFile.delete()
+                }
                 val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == fileName }
                 val presetId = matchingPreset?.id ?: fileName
                 if (uiState.value.activeModelId == presetId) {
