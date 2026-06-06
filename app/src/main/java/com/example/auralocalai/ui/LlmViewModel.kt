@@ -51,6 +51,8 @@ data class ChatMessage(
     val fileType: String? = null
 )
 
+const val DEFAULT_SYSTEM_PROMPT = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise."
+
 sealed interface ModelState {
     data object Unloaded : ModelState
     data object Loading : ModelState
@@ -74,7 +76,9 @@ data class UiState(
     val extractedOcrText: String? = null,
     val isAttachmentProcessing: Boolean = false,
     val attachmentError: String? = null,
-    val hfToken: String = ""
+    val hfToken: String = "",
+    val contextWindowSize: Int = 6,
+    val systemPrompt: String = DEFAULT_SYSTEM_PROMPT
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
@@ -164,10 +168,18 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         migrateExistingModels()
         refreshDownloadedModels()
 
-        // Initialize hfToken from SharedPreferences
+        // Initialize hfToken, contextWindowSize, and systemPrompt from SharedPreferences
         val prefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         val initialHfToken = prefs.getString("hf_token", "") ?: ""
-        _uiState.update { it.copy(hfToken = initialHfToken) }
+        val initialContextWindow = prefs.getInt("context_window_size", 6)
+        val initialSystemPrompt = prefs.getString("system_prompt", DEFAULT_SYSTEM_PROMPT) ?: DEFAULT_SYSTEM_PROMPT
+        _uiState.update { 
+            it.copy(
+                hfToken = initialHfToken,
+                contextWindowSize = initialContextWindow,
+                systemPrompt = initialSystemPrompt
+            ) 
+        }
 
         viewModelScope.launch {
             ModelDownloadService.downloadState.collect { state ->
@@ -348,6 +360,26 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 callback(false, "Validation failed: ${e.localizedMessage}")
             }
         }
+    }
+
+    fun saveContextWindowSize(size: Int) {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putInt("context_window_size", size).apply()
+        _uiState.update { it.copy(contextWindowSize = size) }
+    }
+
+    fun saveSystemPrompt(prompt: String) {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("system_prompt", prompt).apply()
+        _uiState.update { it.copy(systemPrompt = prompt) }
+    }
+
+    fun stopGeneration() {
+        inferenceJob?.cancel()
+        _uiState.update { it.copy(isGenerating = false) }
+        saveMessages(_uiState.value.messages)
     }
 
     fun cancelDownload() {
@@ -651,11 +683,11 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         saveMessages(currentMessages)
 
         inferenceJob = viewModelScope.launch {
-            val systemHeader = "System: You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise.\n\n"
+            val systemHeader = "System: ${uiState.value.systemPrompt}\n\n"
             
             val activeModel = _uiState.value.activeModelId
             
-            val history = currentMessages.takeLast(6).joinToString("\n") { msg ->
+            val history = currentMessages.takeLast(uiState.value.contextWindowSize).joinToString("\n") { msg ->
                 if (msg.isUser) {
                     val prefix = when {
                         // Skip OCR context injection for Gemma 4 native multimodal vision model to let it analyze natively

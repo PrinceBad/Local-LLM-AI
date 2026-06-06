@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Description
@@ -253,6 +254,28 @@ fun ChatScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (uiState.messages.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    val formattedChat = uiState.messages.joinToString("\n\n") { msg ->
+                                        val role = if (msg.isUser) "User" else "AI"
+                                        "[$role]: ${msg.content}"
+                                    }
+                                    val sendIntent: Intent = Intent().apply {
+                                        action = Intent.ACTION_SEND
+                                        putExtra(Intent.EXTRA_TEXT, formattedChat)
+                                        type = "text/plain"
+                                    }
+                                    val shareIntent = Intent.createChooser(sendIntent, "Share Chat History")
+                                    context.startActivity(shareIntent)
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Share Chat",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                             IconButton(
                                 onClick = { viewModel.clearChat() },
                                 modifier = Modifier.size(40.dp)
@@ -627,34 +650,53 @@ fun ChatScreen(
                             
                             Spacer(modifier = Modifier.width(4.dp))
                             
-                            val canSend = (textInput.isNotBlank() || hasAttachment) && !uiState.isGenerating && !uiState.isAttachmentProcessing
-                            IconButton(
-                                onClick = {
-                                    viewModel.sendMessage(textInput)
-                                    textInput = ""
-                                },
-                                enabled = canSend,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (canSend) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                        }
-                                    )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send Message",
-                                    tint = if (canSend) {
-                                        Color.White
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                            if (uiState.isGenerating) {
+                                IconButton(
+                                    onClick = {
+                                        viewModel.stopGeneration()
                                     },
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.error)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Stop Generation",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            } else {
+                                val canSend = (textInput.isNotBlank() || hasAttachment) && !uiState.isAttachmentProcessing
+                                IconButton(
+                                    onClick = {
+                                        viewModel.sendMessage(textInput)
+                                        textInput = ""
+                                    },
+                                    enabled = canSend,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (canSend) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                            }
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = "Send Message",
+                                        tint = if (canSend) {
+                                            Color.White
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }

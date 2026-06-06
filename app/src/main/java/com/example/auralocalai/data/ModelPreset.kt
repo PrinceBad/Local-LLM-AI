@@ -1,5 +1,8 @@
 package com.example.auralocalai.data
 
+import java.io.File
+import java.util.zip.ZipFile
+
 enum class LlmBackendRestriction {
     ANY,
     CPU_ONLY,
@@ -81,5 +84,39 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY
             )
         )
+    }
+}
+
+fun isValidModelFile(file: File): Boolean {
+    if (!file.exists() || file.length() == 0L) return false
+    return try {
+        // 1. Try checking if it's a valid ZIP archive containing expected files
+        val isZip = try {
+            ZipFile(file).use { zip ->
+                zip.entries().asSequence().any {
+                    it.name.endsWith(".tflite") || 
+                    it.name.endsWith(".litert") || 
+                    it.name.endsWith(".bin")
+                }
+            }
+        } catch (_: Exception) {
+            false
+        }
+        
+        if (isZip) return true
+
+        // 2. Otherwise, check if it's a raw TFLite flatbuffer (magic bytes 'TFL3' at offset 4)
+        file.inputStream().use { input ->
+            val header = ByteArray(8)
+            val bytesRead = input.read(header)
+            if (bytesRead >= 8) {
+                val magic = String(header.sliceArray(4..7), Charsets.US_ASCII)
+                magic == "TFL3"
+            } else {
+                false
+            }
+        }
+    } catch (e: Exception) {
+        false
     }
 }

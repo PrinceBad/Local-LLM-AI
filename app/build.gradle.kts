@@ -96,6 +96,9 @@ dependencies {
   // OkHttp for streaming network downloads
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+  // Kotlinx Serialization JSON support
+  implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
   // Offline OCR and Image Loading
   implementation("com.google.mlkit:text-recognition:16.0.1")
   implementation("io.coil-kt:coil-compose:2.6.0")

@@ -334,6 +334,14 @@ class ModelDownloader {
             }
         }
 
+        // Run integrity validation check on downloaded model package
+        if (!isValidModelFile(destinationFile)) {
+            Log.e(TAG, "Integrity check failed for: ${destinationFile.absolutePath}")
+            destinationFile.delete()
+            emit(DownloadState.Error("Downloaded file is corrupted or is not a valid model package (failed Flatbuffer/ZIP structure validation). Please delete and re-download."))
+            return@flow
+        }
+
         Log.i(TAG, "Download complete. Total bytes: $downloadedBytes")
         emit(DownloadState.Success(destinationFile.absolutePath))
     }.flowOn(Dispatchers.IO)
