@@ -38,12 +38,13 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 
 The app includes built-in presets for several highly-capable, lightweight models optimized for mobile execution. Below are their approximate download sizes and memory requirements:
 
-| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement |
-| :--- | :--- | :--- | :--- | :--- |
-| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.6 GB | 6 GB+ |
-| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.6 GB | 6 GB+ |
-| **Gemma 1.1 2B IT** | Google | 2B | ~1.4 GB | 8 GB+ |
-| **Phi-2 2.7B** | Microsoft | 2.7B | ~1.6 GB | 8 GB+ |
+| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.6 GB | 6 GB+ | No |
+| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.6 GB | 6 GB+ | No |
+| **Google Gemma 2 2B IT** | Google | 2B | ~1.6 GB | 6 GB+ | No |
+| **Google Gemma 4 E2B Instruct** | Google | 2B | ~1.5 GB | 6 GB+ | Yes |
+| **Google Gemma 4 E4B Instruct** | Google | 4B | ~2.8 GB | 8 GB+ | Yes |
 
 ---
 
@@ -53,17 +54,23 @@ The app includes built-in presets for several highly-capable, lightweight models
 | --- | --- |
 | High-performance offline LLM execution | Attach Images, Videos & Documents (PDF, Code, Text) |
 | Vulkan GPU acceleration with graceful CPU fallback | Offline image OCR text extraction using Google ML Kit |
-| Graceful CPU fallback optimization | Offline page-by-page PDF rendering and text recognition |
+| Stop Generation button during active streaming | Offline page-by-page PDF rendering and text recognition |
 | Streaming word-by-word responses | Playback attached videos natively and view documents via Intent |
 
 | UI / Experience | Core Features |
 | --- | --- |
 | Premium Material 3 dynamic styling | Complete offline privacy (no logs or tracking) |
-| Custom system instructions prompt | Large model memory size & RAM badges in-app |
-| Interactive file attachments preview drawer | Multi-turn chat context memory (6-turn history) |
-| Collapsible OCR logs under bubble cards | Quantized weights optimizations |
+| Settings Slider for Context Window (4-12 turns) | Large model memory size & RAM badges in-app |
+| Custom system instructions prompt & personas | Chat History Persistence (saves to `chat_history.json`) |
+| Interactive file attachments preview drawer | Export/Share Chat transcript via native Android share sheet |
+| Gated model downloads with Hugging Face Token | Model package integrity check (ZIP/Flatbuffer verification) |
+| Delete confirmation warning dialog | 100% Dark Mode cohesive compliance |
 
-### Recent UI/UX Optimizations (v1.1+)
+### Recent UI/UX & Quality-of-Life Optimizations (v1.2+)
+- **Hugging Face Authentication**: Added dedicated settings screen to securely input, validate, and save your Hugging Face Access Token with automatic S3 redirect auth-header handling.
+- **Configurable Context Window**: Added settings slider (4 to 12 turns) to dynamically limit history, saving RAM and improving response speed.
+- **System Prompt Guidelines**: Enabled customizing system instructions to guide local AI personas.
+- **Post-Download Validation**: Introduced structural file validation after downloads complete to avoid native crashes on corrupted model files.
 - **Consolidated Top Header**: Reduced vertical height to 56.dp, center-aligned settings and delete icons, added system status bar padding, and cleaned up loaded model titles.
 - **Refined Chat Bubbles**: Applied uniform 16.dp corner radius with a sharp 4.dp anchor corner on the sender's edge, expanded text margins, and integrated high-contrast borders for light and dark themes.
 - **Sleek Input & Attachments**: Replaced individual file buttons with a single "+" dropdown trigger, introduced a compact text input area using custom BasicTextField, and implemented state-based styling for the send controls.
