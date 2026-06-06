@@ -130,7 +130,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         if (oldExternalDir != null && oldExternalDir.exists() && oldExternalDir != targetDir) {
             val files = oldExternalDir.listFiles() ?: emptyArray()
             for (file in files) {
-                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin"))) {
+                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin") || file.name.endsWith(".litertlm"))) {
                     val destFile = File(targetDir, file.name)
                     try {
                         if (!destFile.exists()) {
@@ -149,7 +149,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         if (oldInternalDir.exists() && oldInternalDir != targetDir) {
             val files = oldInternalDir.listFiles() ?: emptyArray()
             for (file in files) {
-                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin"))) {
+                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin") || file.name.endsWith(".litertlm"))) {
                     val destFile = File(targetDir, file.name)
                     try {
                         if (!destFile.exists()) {
@@ -268,7 +268,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshDownloadedModels() {
         val files = storageDir.listFiles() ?: emptyArray()
-        val localFiles = files.filter { it.isFile && it.name.endsWith(".task") }.map { it.name }
+        val localFiles = files.filter { it.isFile && (it.name.endsWith(".task") || it.name.endsWith(".bin") || it.name.endsWith(".litertlm")) }.map { it.name }
         _uiState.update { it.copy(localModels = localFiles) }
     }
 
