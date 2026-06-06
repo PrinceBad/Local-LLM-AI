@@ -105,7 +105,7 @@ class LlmInferenceEngine(private val context: Context) {
                 val attemptCpu = (restriction == LlmBackendRestriction.CPU_ONLY || restriction == LlmBackendRestriction.ANY)
                 if (attemptCpu) {
                     // Check RAM size before committing to CPU execution to prevent native OOM crashes
-                    val ramCheck = verifyDeviceRamForCpu()
+                    val ramCheck = verifyDeviceRamForCpu(preset)
                     if (ramCheck.isFailure) {
                         val ramError = ramCheck.exceptionOrNull() ?: Exception("RAM check failed for CPU execution")
                         return@withContext Result.failure(ramError)
@@ -147,7 +147,7 @@ class LlmInferenceEngine(private val context: Context) {
      * Checks if the device has at least 8 GB of total RAM.
      * Throws an explicit exception if RAM is insufficient, avoiding a silent native OS OOM kill.
      */
-    private fun verifyDeviceRamForCpu(): Result<Unit> {
+    private fun verifyDeviceRamForCpu(preset: ModelPreset?): Result<Unit> {
         return try {
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             if (activityManager == null) {
@@ -157,7 +157,16 @@ class LlmInferenceEngine(private val context: Context) {
             val memoryInfo = ActivityManager.MemoryInfo()
             activityManager.getMemoryInfo(memoryInfo)
             val totalRamBytes = memoryInfo.totalMem
-            val minRequiredRamBytes = 8L * 1024 * 1024 * 1024 // 8 GB
+            
+            var requiredGb = 6.0
+            if (preset != null) {
+                if (preset.ramRequirement.contains("8 GB")) requiredGb = 8.0
+                else if (preset.ramRequirement.contains("6 GB")) requiredGb = 6.0
+                else if (preset.ramRequirement.contains("4 GB")) requiredGb = 4.0
+            }
+            
+            val thresholdGb = requiredGb - 1.5
+            val minRequiredRamBytes = (thresholdGb * 1024 * 1024 * 1024).toLong()
 
             if (totalRamBytes < minRequiredRamBytes) {
                 val actualRamGb = String.format("%.2f", totalRamBytes.toDouble() / (1024 * 1024 * 1024))
