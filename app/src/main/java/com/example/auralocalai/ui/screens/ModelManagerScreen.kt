@@ -10,7 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
@@ -50,7 +50,7 @@ fun ModelManagerScreen(
                     title = { Text("LOCAL LLM MANAGER", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp, color = MaterialTheme.colorScheme.primary) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Go Back", tint = MaterialTheme.colorScheme.primary)
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Go Back", tint = MaterialTheme.colorScheme.primary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)

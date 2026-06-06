@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.ByteArrayOutputStream
-import java.util.zip.ZipFile
 
 class LlmInferenceEngine(private val context: Context) {
 
