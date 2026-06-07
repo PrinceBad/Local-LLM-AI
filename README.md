@@ -40,12 +40,14 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 
 The app includes built-in presets for several highly-capable, lightweight models optimized for mobile execution. Below are their approximate download sizes and memory requirements:
 
-| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.6 GB | 6 GB+ | No |
-| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.6 GB | 6 GB+ | No |
-| **Google Gemma 2 2B IT** | Google | 2B | ~1.6 GB | 6 GB+ | No |
-| **Google Gemma 4 E2B Instruct** | Google | 2B | ~1.5 GB | 6 GB+ | Yes |
+| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.6 GB | 6 GB+ | No |
+| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.6 GB | 6 GB+ | No |
+| **Qwen 2.5 0.5B Instruct** | Alibaba | 0.5B | ~0.6 GB | 4 GB+ | No |
+| **Qwen 3 4B** | Alibaba | 4B | ~2.8 GB | 8 GB+ | No |
+| **Qwen 2.5 Coder 3B Instruct** | Alibaba | 3B | ~2.0 GB | 6 GB+ | No |
+| **Google Gemma 4 E2B Instruct** | Google | 2B | ~1.5 GB | 6 GB+ | Yes |
 | **Google Gemma 4 E4B Instruct** | Google | 4B | ~2.8 GB | 8 GB+ | Yes |
 
 ---
