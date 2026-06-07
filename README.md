@@ -8,7 +8,7 @@
 
 [![Latest release](https://img.shields.io/badge/releases-GitHub-181717?style=for-the-badge&logo=github&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=0d1117)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/PrinceBad/Local-LLM-AI/total?style=for-the-badge&logo=github&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases)
+[![Downloads](https://img.shields.io/github/downloads/PrinceBad/Local-LLM-AI/total?style=for-the-badge&logo=github&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases/latest/download/app-release.apk)
 [![Android](https://img.shields.io/badge/platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white&labelColor=0d1117)](#download)
 <br/>
 
@@ -94,7 +94,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 ## Download
 
-Grab the latest compiled APKs from the [GitHub releases page](https://github.com/PrinceBad/Local-LLM-AI/releases/latest).
+Grab the latest compiled APK by clicking the [**Direct Download Link**](https://github.com/PrinceBad/Local-LLM-AI/releases/latest/download/app-release.apk) (or view all versions and release details on the [GitHub releases page](https://github.com/PrinceBad/Local-LLM-AI/releases/latest)).
 
 The release APK (`app-release.apk`) is optimized for mobile hardware using on-device GPU (Vulkan) or CPU.
 
