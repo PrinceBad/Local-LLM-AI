@@ -40,23 +40,12 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 
 The app includes built-in presets for several highly-capable, lightweight models optimized for mobile execution. Below are their approximate download sizes and memory requirements:
 
-| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) |
-
-| :--- | :--- | :--- | :--- | :--- | :--- |
-
-| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.7 GB | 6 GB+ | No |
-
-| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.5 GB | 6 GB+ | No |
-
-| **Qwen 2.5 0.5B Instruct** | Alibaba | 0.5B | ~0.5 GB | 4 GB+ | No |
-
-| **Qwen 3 4B** | Alibaba | 4B | ~2.5 GB | 8 GB+ | No |
-
-| **Qwen 2.5 Coder 3B Instruct** | Alibaba | 3B | ~2.9 GB | 6 GB+ | No |
-
-| **Google Gemma 4 E2B Instruct** | Google | 2B | ~2.4 GB | 6 GB+ | Yes |
-
-| **Google Gemma 4 E4B Instruct** | Google | 4B | ~3.4 GB | 8 GB+ | Yes |
+| Text & Reasoning Models | Multimodal & Coding Models |
+| --- | --- |
+| **DeepSeek-R1 Distill Qwen 1.5B**<br/>• Parameters: 1.5B \| Size: ~1.7 GB<br/>• Min. RAM: 6 GB+ (Offline Reasoning) | **Qwen 2.5 Coder 3B Instruct**<br/>• Parameters: 3B \| Size: ~2.9 GB<br/>• Min. RAM: 6 GB+ (Coding Expert) |
+| **Qwen 2.5 1.5B Instruct**<br/>• Parameters: 1.5B \| Size: ~1.5 GB<br/>• Min. RAM: 6 GB+ (General Knowledge) | **Google Gemma 4 E2B Instruct**<br/>• Parameters: 2B \| Size: ~2.4 GB<br/>• Min. RAM: 6 GB+ (Multimodal Vision) |
+| **Qwen 3 4B**<br/>• Parameters: 4B \| Size: ~2.5 GB<br/>• Min. RAM: 8 GB+ (High Performance) | **Google Gemma 4 E4B Instruct**<br/>• Parameters: 4B \| Size: ~3.4 GB<br/>• Min. RAM: 8 GB+ (High-Res Multimodal) |
+| **Qwen 2.5 0.5B Instruct**<br/>• Parameters: 0.5B \| Size: ~0.5 GB<br/>• Min. RAM: 4 GB+ (Ultra-Fast) | |
 
 ---
 
