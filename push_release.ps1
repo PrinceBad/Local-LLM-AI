@@ -21,7 +21,7 @@ Write-Host "Tag v1.1 successfully pushed to GitHub!" -ForegroundColor Green
 # 3. Create GitHub Release using gh CLI if available
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     Write-Host "GitHub CLI (gh) detected. Publishing the release and uploading the release APK..." -ForegroundColor Cyan
-    gh release create v1.1 app/build/outputs/apk/release/app-release.apk --title "v1.1 Release" --notes "Phase 2 update bringing offline voice input (STT), Gemma 4 native multimodal vision routing, and newest LiteRT presets (Qwen3 0.6B, Gemma 4 E2B)." --latest
+    gh release create v1.1 app/build/outputs/apk/release/app-release.apk --title "v1.1 Release" --notes "Phase 2 update bringing offline voice input (STT), Gemma 4 native multimodal vision routing, and newest LiteRT presets (Qwen 3 4B, Gemma 4 E2B)." --latest
 } else {
     Write-Host "GitHub CLI (gh) not detected. Please upload the compiled APK manually to the GitHub release page:" -ForegroundColor Yellow
     Write-Host "https://github.com/PrinceBad/Local-LLM-AI/releases" -ForegroundColor Yellow

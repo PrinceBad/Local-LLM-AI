@@ -26,7 +26,7 @@ Additionally, this application executes all calculations offline. No internet co
 
 ## What Is Local LLM/AI?
 
-Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Qwen 2.5, DeepSeek-R1, Phi-2, and Gemma 2B) natively on mobile hardware. 
+Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **Google AI Edge LiteRT** (formerly MediaPipe Tasks GenAI) engine, the app compiles and runs lightweight LLMs (like DeepSeek-R1, Qwen 2.5, Qwen 3, and Google Gemma 4) natively on mobile hardware. 
 
 The app targets GPU acceleration (Vulkan) for responsive streaming generation with graceful CPU fallback.
 
@@ -40,15 +40,23 @@ The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Ma
 
 The app includes built-in presets for several highly-capable, lightweight models optimized for mobile execution. Below are their approximate download sizes and memory requirements:
 
-| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.6 GB | 6 GB+ | No |
-| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.6 GB | 6 GB+ | No |
-| **Qwen 2.5 0.5B Instruct** | Alibaba | 0.5B | ~0.6 GB | 4 GB+ | No |
-| **Qwen 3 4B** | Alibaba | 4B | ~2.8 GB | 8 GB+ | No |
-| **Qwen 2.5 Coder 3B Instruct** | Alibaba | 3B | ~2.0 GB | 6 GB+ | No |
-| **Google Gemma 4 E2B Instruct** | Google | 2B | ~1.5 GB | 6 GB+ | Yes |
-| **Google Gemma 4 E4B Instruct** | Google | 4B | ~2.8 GB | 8 GB+ | Yes |
+| Model | Developer | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) |
+
+| :--- | :--- | :--- | :--- | :--- | :--- |
+
+| **DeepSeek-R1 Distill Qwen 1.5B** | DeepSeek | 1.5B | ~1.7 GB | 6 GB+ | No |
+
+| **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.5 GB | 6 GB+ | No |
+
+| **Qwen 2.5 0.5B Instruct** | Alibaba | 0.5B | ~0.5 GB | 4 GB+ | No |
+
+| **Qwen 3 4B** | Alibaba | 4B | ~2.5 GB | 8 GB+ | No |
+
+| **Qwen 2.5 Coder 3B Instruct** | Alibaba | 3B | ~2.9 GB | 6 GB+ | No |
+
+| **Google Gemma 4 E2B Instruct** | Google | 2B | ~2.4 GB | 6 GB+ | Yes |
+
+| **Google Gemma 4 E4B Instruct** | Google | 4B | ~3.4 GB | 8 GB+ | Yes |
 
 ---
 
@@ -121,7 +129,7 @@ Local LLM/AI is built on top of state-of-the-art on-device intelligence librarie
 
 Special thanks to:
 
-- [Google MediaPipe Tasks GenAI](https://github.com/google-ai-edge/mediapipe)
+- [Google AI Edge LiteRT](https://ai.google.dev/edge/litert)
 - [Google ML Kit Text Recognition](https://developers.google.com/ml-kit/vision/text-recognition)
 - [Jetpack Compose & Material 3](https://developer.android.com/compose)
 - [Coil Image Loading Library](https://github.com/coil-kt/coil)
