@@ -26,7 +26,7 @@ data class ModelPreset(
             ModelPreset(
                 id = "deepseek-1.5b",
                 name = "DeepSeek-R1 Distill Qwen 1.5B",
-                description = "DeepSeek's powerful reasoning model distilled into Qwen architecture, outputting detailed chain-of-thought logic.",
+                description = "DeepSeek's powerful reasoning model distilled into Qwen architecture, outputting detailed chain-of-thought logic (Offline Reasoning).",
                 sizeLabel = "1.7 GB",
                 ramRequirement = "6 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task",
@@ -38,7 +38,7 @@ data class ModelPreset(
             ModelPreset(
                 id = "qwen-1.5b",
                 name = "Qwen 2.5 1.5B Instruct",
-                description = "Alibaba's state-of-the-art multilingual LLM. Outperforms models of similar size in math, coding, and general knowledge.",
+                description = "Alibaba's state-of-the-art multilingual LLM. Outperforms models of similar size in math, coding, and general knowledge (General Knowledge).",
                 sizeLabel = "1.5 GB",
                 ramRequirement = "6 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
@@ -51,7 +51,7 @@ data class ModelPreset(
                         ModelPreset(
                 id = "qwen-0.5b",
                 name = "Qwen 2.5 0.5B Instruct",
-                description = "Alibaba's ultra-lightweight fast LLM.",
+                description = "Alibaba's ultra-lightweight, fast on-device LLM (Ultra-Fast).",
                 sizeLabel = "0.5 GB",
                 ramRequirement = "4 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task",
@@ -63,7 +63,7 @@ data class ModelPreset(
             ModelPreset(
                 id = "qwen3-4b",
                 name = "Qwen 3 4B",
-                description = "Alibaba's latest powerful Qwen 3 architecture with 4 billion parameters.",
+                description = "Alibaba's latest powerful Qwen 3 architecture with 4 billion parameters (High Performance).",
                 sizeLabel = "2.5 GB",
                 ramRequirement = "8 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/Qwen3-4B/resolve/main/qwen3_4b_mixed_int4.litertlm",
@@ -75,7 +75,7 @@ data class ModelPreset(
             ModelPreset(
                 id = "qwen2.5-coder-3b",
                 name = "Qwen 2.5 Coder 3B Instruct",
-                description = "Alibaba's fast and highly capable coding-specialized LLM with 3 billion parameters.",
+                description = "Alibaba's fast and highly capable coding-specialized LLM with 3 billion parameters (Coding Expert).",
                 sizeLabel = "2.9 GB",
                 ramRequirement = "6 GB+ RAM",
                 downloadUrl = "https://huggingface.co/4ntoine/Qwen2.5-Coder-3B-Instruct-LiteRTLM/resolve/main/model.litertlm",
@@ -87,7 +87,7 @@ data class ModelPreset(
 ModelPreset(
                 id = "gemma4-e2b",
                 name = "Google Gemma 4 E2B Instruct (Multimodal)",
-                description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support.",
+                description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support (Multimodal Vision).",
                 sizeLabel = "2.4 GB",
                 ramRequirement = "6 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
@@ -99,7 +99,7 @@ ModelPreset(
             ModelPreset(
                 id = "gemma4-e4b",
                 name = "Google Gemma 4 E4B Instruct (Multimodal)",
-                description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support.",
+                description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support (High-Res Multimodal).",
                 sizeLabel = "3.4 GB",
                 ramRequirement = "8 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
