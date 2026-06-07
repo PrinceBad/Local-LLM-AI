@@ -89,7 +89,7 @@ dependencies {
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 
-  // MediaPipe Tasks GenAI for local LLM inference
+  // Google AI Edge LiteRT for local LLM inference
   implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
   implementation("androidx.compose.material:material-icons-core")
   implementation("androidx.compose.material:material-icons-extended")
