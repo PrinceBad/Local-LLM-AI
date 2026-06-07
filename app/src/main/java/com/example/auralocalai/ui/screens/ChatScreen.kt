@@ -351,7 +351,7 @@ fun ChatScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(uiState.messages) { message ->
+                    items(items = uiState.messages, key = { it.id }) { message ->
                         ChatBubble(message = message)
                     }
 
@@ -1188,3 +1188,4 @@ fun EmptyStateOnboarding(
     }
 }
 }
+

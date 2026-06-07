@@ -48,7 +48,8 @@ data class ChatMessage(
     val videoUri: String? = null,
     val fileUri: String? = null,
     val fileName: String? = null,
-    val fileType: String? = null
+    val fileType: String? = null,
+    val id: String = java.util.UUID.randomUUID().toString()
 )
 
 const val DEFAULT_SYSTEM_PROMPT = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise."
@@ -727,11 +728,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             inferenceEngine.generateResponse(fullPrompt, imageBitmap).collect { partialToken ->
                 accumulatedText += partialToken
                 val currentTime = System.currentTimeMillis()
-                if (currentTime - lastUpdateTime > 50) {
+                if (currentTime - lastUpdateTime > 100) {
                     _uiState.update { state ->
                         val updatedMessages = state.messages.toMutableList()
                         if (updatedMessages.isNotEmpty()) {
-                            updatedMessages[updatedMessages.lastIndex] = ChatMessage(accumulatedText, isUser = false)
+                            val oldMessage = updatedMessages.last()
+                            updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
                         }
                         state.copy(messages = updatedMessages)
                     }
@@ -741,7 +743,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { state ->
                 val updatedMessages = state.messages.toMutableList()
                 if (updatedMessages.isNotEmpty()) {
-                    updatedMessages[updatedMessages.lastIndex] = ChatMessage(accumulatedText, isUser = false)
+                    val oldMessage = updatedMessages.last()
+                            updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
                 }
                 state.copy(messages = updatedMessages)
             }
@@ -770,4 +773,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         inferenceEngine.close()
     }
 }
+
+
+
 

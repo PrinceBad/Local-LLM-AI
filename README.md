@@ -30,6 +30,8 @@ Local LLM/AI is a high-fidelity, modern Android client designed to provide a com
 
 The app targets GPU acceleration (Vulkan) for responsive streaming generation with graceful CPU fallback.
 
+> **Performance Note:** Execution speed depends entirely on the model size and your device's hardware. Larger models in .litertlm format (like Qwen 3 4B) will natively generate text slower than smaller .task models (like Qwen 1.5B) due to processing significantly more parameters.
+
 The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface featuring offline OCR document parsing, video/file media integration, and background download handling.
 
 ---
@@ -75,6 +77,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 - **Refined Chat Bubbles**: Applied uniform 16.dp corner radius with a sharp 4.dp anchor corner on the sender's edge, expanded text margins, and integrated high-contrast borders for light and dark themes.
 - **Sleek Input & Attachments**: Replaced individual file buttons with a single "+" dropdown trigger, introduced a compact text input area using custom BasicTextField, and implemented state-based styling for the send controls.
 - **Seamless Keyboard Handling**: Redesigned layout flow to use sequential vertical Column with .imePadding(), automatically shifting the input bar and triggering auto-scroll to the bottom upon soft keyboard popups without leaving blank gaps.
+- **Optimized Compose UI**: Drastically reduced UI rendering overhead and scrolling stutter during LLM streaming generation by maintaining stable chat item identities and intelligently throttling Compose state updates.
 
 ---
 
@@ -136,3 +139,4 @@ Local LLM/AI is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 Local LLM/AI is an independent, unofficial project. It is not affiliated with, funded, authorized, endorsed by, or associated with Google LLC, MediaPipe, Gemma, or any of their affiliates.
 
 All trademarks, service marks, catalogs, artwork, metadata, and model weights remain the property of their respective owners. Users are responsible for procuring and loading model files in compliance with the respective model's terms of use, license agreements, and regional requirements.
+
