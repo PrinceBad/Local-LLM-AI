@@ -24,3 +24,7 @@ val LightTertiary = Color(0xFF0D9488)
 val LightOnBackground = Color(0xFF0F172A)
 val LightOnSurface = Color(0xFF0F172A)
 val LightOnSurfaceVariant = Color(0xFF475569)
+
+val AmoledBackground = Color(0xFF000000)
+val AmoledSurface = Color(0xFF000000)
+val AmoledSurfaceVariant = Color(0xFF090A0B)

@@ -37,6 +37,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.ListSerializer
 import android.util.Log
+import com.example.auralocalai.theme.ThemeMode
 
 @Serializable
 data class ChatMessage(
@@ -79,7 +80,8 @@ data class UiState(
     val attachmentError: String? = null,
     val hfToken: String = "",
     val contextWindowSize: Int = 6,
-    val systemPrompt: String = DEFAULT_SYSTEM_PROMPT
+    val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
@@ -372,6 +374,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         prefs.edit().putInt("context_window_size", size).apply()
         _uiState.update { it.copy(contextWindowSize = size) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("theme_preference", mode.name).apply()
+        _uiState.update { it.copy(themeMode = mode) }
     }
 
     fun saveSystemPrompt(prompt: String) {

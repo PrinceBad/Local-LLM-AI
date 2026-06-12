@@ -106,7 +106,9 @@ To compile the application yourself, ensure you have Java 17 and Android SDK set
 
 ### Build Release APK
 ```powershell
-$env:JAVA_HOME = "C:\Users\Badsiwal\.gradle\jdks\eclipse_adoptium-17-amd64-windows.2"
+# Set this to your own JDK 17 path
+$env:JAVA_HOME = "C:\path\to\your\jdk-17"
+./gradlew assembleRelease
 ./gradlew assembleRelease
 ```
 

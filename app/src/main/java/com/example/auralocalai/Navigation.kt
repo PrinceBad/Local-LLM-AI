@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai
+package com.example.auralocalai
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -13,10 +13,10 @@ import com.example.auralocalai.ui.screens.ModelManagerScreen
 import com.example.auralocalai.ui.screens.SettingsScreen
 
 @Composable
-fun MainNavigation() {
+fun MainNavigation(llmViewModel: LlmViewModel) {
   val backStack = rememberNavBackStack(Main)
   // Shared LlmViewModel to persist state across screens
-  val llmViewModel: LlmViewModel = viewModel()
+  
 
   NavDisplay(
     backStack = backStack,

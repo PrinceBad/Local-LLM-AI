@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.auralocalai.theme.ThemeMode
 import com.example.auralocalai.ui.LlmViewModel
 import kotlinx.coroutines.launch
 
@@ -300,6 +301,60 @@ fun SettingsScreen(
                                     fontWeight = FontWeight.Medium,
                                     color = if (isSuccess) MaterialTheme.colorScheme.onTertiaryContainer
                                             else MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Appearance Card
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Appearance",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Select Theme",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    val themeOptions = listOf(
+                        ThemeMode.SYSTEM to "System",
+                        ThemeMode.LIGHT to "Light",
+                        ThemeMode.DARK to "Dark",
+                        ThemeMode.AMOLED to "Amoled Dark"
+                    )
+                    
+                    Column {
+                        themeOptions.forEach { (mode, label) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = uiState.themeMode == mode,
+                                    onClick = { viewModel.setThemeMode(mode) },
+                                    colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = label,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
