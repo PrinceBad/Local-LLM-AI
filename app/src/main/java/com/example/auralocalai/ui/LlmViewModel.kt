@@ -1,4 +1,4 @@
-package com.example.auralocalai.ui
+﻿package com.example.auralocalai.ui
 
 import android.app.Application
 import android.os.Build
@@ -9,6 +9,7 @@ import com.example.auralocalai.data.LlmInferenceEngine
 import com.example.auralocalai.data.ModelDownloader
 import com.example.auralocalai.data.ModelPreset
 import com.example.auralocalai.data.LlmBackendRestriction
+import com.example.auralocalai.data.isValidModelFile
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -69,6 +70,8 @@ data class UiState(
     val downloadState: DownloadState = DownloadState.Idle,
     val currentDownloadingModelId: String? = null,
     val activeModelId: String? = null,
+    val activeBackend: String = "None",
+    val lastNpuError: String? = null,
     val localModels: List<String> = emptyList(),
     val selectedImageUri: String? = null,
     val selectedVideoUri: String? = null,
@@ -81,7 +84,9 @@ data class UiState(
     val hfToken: String = "",
     val contextWindowSize: Int = 6,
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
-    val themeMode: ThemeMode = ThemeMode.SYSTEM
+    val loadingStage: String? = null,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val importProgress: Float? = null
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
@@ -111,7 +116,15 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val _uiState = MutableStateFlow(UiState(messages = loadMessages()))
+    private val _uiState = MutableStateFlow(UiState())
+
+    init {
+        // Load chat history off the main thread to avoid disk I/O on the main thread during init
+        viewModelScope.launch(Dispatchers.IO) {
+            val history = loadMessages()
+            _uiState.update { it.copy(messages = history) }
+        }
+    }
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     private val downloader = ModelDownloader()
@@ -252,17 +265,33 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     val modelName = matchingPreset?.name ?: firstDownloaded
                     val modelId = matchingPreset?.id ?: firstDownloaded
                     
-                    _uiState.update { it.copy(modelState = ModelState.Loading) }
-                    val result = inferenceEngine.loadModel(File(storageDir, firstDownloaded).absolutePath)
+                    _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model fileâ€¦") }
+                    val result = inferenceEngine.loadModel(
+                        modelPath = File(storageDir, firstDownloaded).absolutePath,
+                        onStageUpdate = { stage ->
+                            _uiState.update { it.copy(loadingStage = stage) }
+                        }
+                    )
                     if (result.isSuccess) {
                         _uiState.update { 
                             it.copy(
                                 modelState = ModelState.Loaded(modelName),
-                                activeModelId = modelId
+                                activeModelId = modelId,
+                                activeBackend = inferenceEngine.activeBackend,
+                                lastNpuError = inferenceEngine.lastNpuError?.let { err ->
+                                    val sw = java.io.StringWriter()
+                                    err.printStackTrace(java.io.PrintWriter(sw))
+                                    sw.toString()
+                                },
+                                loadingStage = null
                             )
                         }
                     } else {
-                        _uiState.update { it.copy(modelState = ModelState.Error(result.exceptionOrNull()?.message ?: "Failed to auto-load")) }
+                        _uiState.update { it.copy(modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)), activeBackend = "None", lastNpuError = inferenceEngine.lastNpuError?.let { err ->
+                                    val sw = java.io.StringWriter()
+                                    err.printStackTrace(java.io.PrintWriter(sw))
+                                    sw.toString()
+                                }, loadingStage = null) }
                     }
                 }
             }
@@ -356,7 +385,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     fun validateHfToken(token: String, callback: (Boolean, String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val testUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task"
+                val testUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm"
                 val result = downloader.validateTokenAccess(testUrl, token)
                 if (result == "OK") {
                     callback(true, "Token is valid!")
@@ -406,24 +435,97 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Maps raw engine exceptions to clear, actionable messages for end users.
+     * Keeps the original technical detail in a collapsed suffix for advanced debugging.
+     */
+    private fun friendlyErrorMessage(raw: String?): String {
+        if (raw.isNullOrBlank()) return "An unknown error occurred while loading the model. Please try again."
+
+        val lower = raw.lowercase()
+        return when {
+            // NPU dispatch libraries not found or NPU initialization failed
+            lower.contains("dispatch runtime") || lower.contains("npu") && lower.contains("failed") ->
+                "NPU acceleration is not available on this device. The app will use GPU or CPU instead."
+
+            // GPU-locked model tried CPU fallback or backend constraint mismatch
+            lower.contains("backend restriction") || lower.contains("gpu_only") ||
+            lower.contains("invalid_argument") && lower.contains("cpu") ->
+                "This model requires a GPU with Vulkan support. CPU execution is not available for this format."
+
+            // Out of memory / resource exhaustion
+            lower.contains("resource_exhausted") || lower.contains("out of memory") ||
+            lower.contains("oom") || lower.contains("insufficient memory") ->
+                "Not enough GPU memory to load this model. Try closing other apps or switching to a smaller model."
+
+            // File corruption or validation failure
+            lower.contains("corrupted") || lower.contains("incomplete") ||
+            lower.contains("not a valid model") || lower.contains("flatbuffer") ||
+            lower.contains("tfl3") || lower.contains("zip archive") ->
+                "The model file appears to be corrupted or incomplete. Please delete it and re-download."
+
+            // Model file missing
+            lower.contains("does not exist") ->
+                "Model file not found on disk. It may have been moved or deleted. Please re-download."
+
+            // Emulator / architecture guard
+            lower.contains("emulator") || lower.contains("x86") ->
+                "On-device LLM inference is not supported on emulators. Please use a physical ARM64 device."
+
+            // RAM insufficient for CPU path
+            lower.contains("inference aborted") || lower.contains("ram") && lower.contains("prevent") ->
+                "This device does not have enough RAM to run this model safely. Try a smaller model (e.g. Qwen 0.5B)."
+
+            // GPU init failure with a meaningful inner message
+            lower.contains("failed to load model on gpu") ->
+                "GPU initialization failed. Your device GPU may not support this model. " +
+                "Check that your GPU drivers are up to date or try a smaller model."
+
+            // Catch-all: return the original but trim excessive length
+            else -> {
+                val trimmed = if (raw.length > 200) raw.take(200) + "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" else raw
+                "Model loading failed: $trimmed"
+            }
+        }
+    }
+
     fun loadModel(fileName: String, modelId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(modelState = ModelState.Loading) }
+            _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model fileâ€¦") }
             val matchingPreset = ModelPreset.presets.firstOrNull { it.id == modelId }
             val displayName = matchingPreset?.name ?: fileName
 
-            val result = inferenceEngine.loadModel(File(storageDir, fileName).absolutePath)
+            val result = inferenceEngine.loadModel(
+                modelPath = File(storageDir, fileName).absolutePath,
+                onStageUpdate = { stage ->
+                    _uiState.update { it.copy(loadingStage = stage) }
+                }
+            )
             if (result.isSuccess) {
                 _uiState.update { 
                     it.copy(
                         modelState = ModelState.Loaded(displayName),
-                        activeModelId = modelId
+                        activeModelId = modelId,
+                        activeBackend = inferenceEngine.activeBackend,
+                        lastNpuError = inferenceEngine.lastNpuError?.let { err ->
+                            val sw = java.io.StringWriter()
+                            err.printStackTrace(java.io.PrintWriter(sw))
+                            sw.toString()
+                        },
+                        loadingStage = null
                     )
                 }
             } else {
                 _uiState.update { 
                     it.copy(
-                        modelState = ModelState.Error(result.exceptionOrNull()?.message ?: "Failed to load model")
+                        modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)),
+                        activeBackend = "None",
+                        lastNpuError = inferenceEngine.lastNpuError?.let { err ->
+                            val sw = java.io.StringWriter()
+                            err.printStackTrace(java.io.PrintWriter(sw))
+                            sw.toString()
+                        },
+                        loadingStage = null
                     )
                 }
             }
@@ -728,33 +830,37 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 null
             }
 
-            val aiMessagePlaceholder = ChatMessage("", isUser = false)
-            _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
+            try {
+                val aiMessagePlaceholder = ChatMessage("", isUser = false)
+                _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
-            var accumulatedText = ""
-            var lastUpdateTime = System.currentTimeMillis()
-            inferenceEngine.generateResponse(fullPrompt, imageBitmap).collect { partialToken ->
-                accumulatedText += partialToken
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastUpdateTime > 100) {
-                    _uiState.update { state ->
-                        val updatedMessages = state.messages.toMutableList()
-                        if (updatedMessages.isNotEmpty()) {
-                            val oldMessage = updatedMessages.last()
-                            updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                var accumulatedText = ""
+                var lastUpdateTime = System.currentTimeMillis()
+                inferenceEngine.generateResponse(fullPrompt, imageBitmap).collect { partialToken ->
+                    accumulatedText += partialToken
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastUpdateTime > 100) {
+                        _uiState.update { state ->
+                            val updatedMessages = state.messages.toMutableList()
+                            if (updatedMessages.isNotEmpty()) {
+                                val oldMessage = updatedMessages.last()
+                                updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                            }
+                            state.copy(messages = updatedMessages)
                         }
-                        state.copy(messages = updatedMessages)
+                        lastUpdateTime = currentTime
                     }
-                    lastUpdateTime = currentTime
                 }
-            }
-            _uiState.update { state ->
-                val updatedMessages = state.messages.toMutableList()
-                if (updatedMessages.isNotEmpty()) {
-                    val oldMessage = updatedMessages.last()
-                            updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                _uiState.update { state ->
+                    val updatedMessages = state.messages.toMutableList()
+                    if (updatedMessages.isNotEmpty()) {
+                        val oldMessage = updatedMessages.last()
+                        updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                    }
+                    state.copy(messages = updatedMessages)
                 }
-                state.copy(messages = updatedMessages)
+            } finally {
+                imageBitmap?.recycle()
             }
             
             _uiState.update { it.copy(isGenerating = false) }
@@ -771,6 +877,46 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         saveMessages(emptyList())
+    }
+
+    fun importModelFile(context: Context, uri: Uri, callback: (Boolean, String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val fileName = getFileName(context, uri)
+                if (!fileName.endsWith(".litertlm", ignoreCase = true) &&
+                    !fileName.endsWith(".task", ignoreCase = true) &&
+                    !fileName.endsWith(".bin", ignoreCase = true)) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        callback(false, "Invalid file format. File must end with .litertlm, .task, or .bin")
+                    }
+                    return@launch
+                }
+
+                val destFile = File(storageDir, fileName)
+                context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    destFile.outputStream().use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                }
+                
+                if (!isValidModelFile(destFile)) {
+                    destFile.delete()
+                    viewModelScope.launch(Dispatchers.Main) {
+                        callback(false, "Validation failed. The imported file is corrupted or not a valid LiteRT/MediaPipe model.")
+                    }
+                    return@launch
+                }
+
+                viewModelScope.launch(Dispatchers.Main) {
+                    refreshDownloadedModels()
+                    callback(true, "Successfully imported $fileName!")
+                }
+            } catch (e: Exception) {
+                viewModelScope.launch(Dispatchers.Main) {
+                    callback(false, "Failed to import model: ${e.localizedMessage}")
+                }
+            }
+        }
     }
 
     override fun onCleared() {
