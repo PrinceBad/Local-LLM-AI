@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
@@ -42,6 +42,9 @@ android {
     packaging {
       resources {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
+      }
+      jniLibs {
+        useLegacyPackaging = true
       }
     }
 }
@@ -91,6 +94,10 @@ dependencies {
 
   // Google AI Edge LiteRT for local LLM inference
   implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
+
+  // Qualcomm QNN runtime for NPU (Hexagon HTP) acceleration on Snapdragon devices
+  implementation("com.qualcomm.qti:qnn-runtime:2.47.0")
+  implementation("com.qualcomm.qti:qnn-litert-delegate:2.47.0")
   implementation("androidx.compose.material:material-icons-core")
   implementation("androidx.compose.material:material-icons-extended")
 
