@@ -1,4 +1,4 @@
-package com.example.auralocalai.ui.screens
+﻿package com.example.auralocalai.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -24,6 +24,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.auralocalai.theme.ThemeMode
+import androidx.compose.ui.platform.LocalContext
+import android.content.pm.PackageManager
+import android.app.ActivityManager
+import android.os.Build
+import android.content.Context
 import com.example.auralocalai.ui.LlmViewModel
 import kotlinx.coroutines.launch
 
@@ -36,6 +41,8 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val diagnostics = remember { getDiagnosticInfo(context) }
 
     var tokenInput by remember(uiState.hfToken) { mutableStateOf(uiState.hfToken) }
     var isTokenVisible by remember { mutableStateOf(false) }
@@ -181,7 +188,7 @@ fun SettingsScreen(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = if (isConfigured) "Configured ✓" else "Not Configured",
+                                text = if (isConfigured) "Configured âœ“" else "Not Configured",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isConfigured) MaterialTheme.colorScheme.onTertiaryContainer
@@ -362,6 +369,77 @@ fun SettingsScreen(
                 }
             }
 
+            // System Diagnostics Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "System Diagnostics",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Vulkan Support", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = if (diagnostics.vulkanSupported) "Supported (${diagnostics.vulkanVersion})" else "Unsupported",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (diagnostics.vulkanSupported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Qualcomm NPU Hardware", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = if (diagnostics.isNpuCapable) "Detected (Qualcomm Hexagon)" else "Not Detected / Unsupported",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (diagnostics.isNpuCapable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Device RAM", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = String.format(java.util.Locale.US, "%.2f GB", diagnostics.totalRamGb),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Supported ABIs", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = diagnostics.abis,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
             // Chat Configuration Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -471,4 +549,67 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+}
+
+
+data class DiagnosticInfo(
+    val vulkanSupported: Boolean,
+    val vulkanVersion: String,
+    val totalRamGb: Double,
+    val isNpuCapable: Boolean,
+    val abis: String
+)
+
+fun getDiagnosticInfo(context: Context): DiagnosticInfo {
+    val pm = context.packageManager
+    var hasVulkan = false
+    var vulkanVer = "Unsupported"
+    try {
+        val features = pm.systemAvailableFeatures
+        for (feature in features) {
+            if (feature.name == "android.hardware.vulkan.version") {
+                hasVulkan = true
+                val version = feature.version
+                val major = version shr 22 and 0x3FF
+                val minor = version shr 12 and 0x3FF
+                val patch = version and 0xFFF
+                vulkanVer = "$major.$minor.$patch"
+                break
+            }
+        }
+    } catch (e: Exception) {
+        // Safe catch
+    }
+
+    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    var totalRam = 0.0
+    if (activityManager != null) {
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        totalRam = memoryInfo.totalMem.toDouble() / (1024 * 1024 * 1024)
+    }
+
+    val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL.uppercase() else ""
+    val hardware = Build.HARDWARE.uppercase()
+    val board = Build.BOARD.uppercase()
+    val combined = "$socModel|$hardware|$board"
+    val isNpu = combined.contains("QCOM") ||
+                 combined.contains("QUALCOMM") ||
+                 combined.contains("SNAPDRAGON") ||
+                 combined.contains("SM8") ||
+                 combined.contains("SM7") ||
+                 combined.contains("SM6") ||
+                 combined.contains("KONA") ||
+                 combined.contains("LAHAINA") ||
+                 combined.contains("TARO") ||
+                 combined.contains("CAPE") ||
+                 combined.contains("KALAMA") ||
+                 combined.contains("PINEAPPLE") ||
+                 combined.contains("CLIFFS") ||
+                 combined.contains("PALAWAN") ||
+                 combined.contains("SUN")
+
+    val abis = Build.SUPPORTED_ABIS.joinToString(", ")
+
+    return DiagnosticInfo(hasVulkan, vulkanVer, totalRam, isNpu, abis)
 }

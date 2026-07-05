@@ -234,18 +234,58 @@ fun ChatScreen(
                             letterSpacing = 1.0.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        var showNpuErrorDialog by remember { mutableStateOf(false) }
+                        if (showNpuErrorDialog && uiState.lastNpuError != null) {
+                            AlertDialog(
+                                onDismissRequest = { showNpuErrorDialog = false },
+                                title = { Text("NPU Error Details") },
+                                text = {
+                                    androidx.compose.foundation.text.selection.SelectionContainer {
+                                        Text(
+                                            text = uiState.lastNpuError ?: "",
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.verticalScroll(rememberScrollState())
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(onClick = { showNpuErrorDialog = false }) {
+                                        Text("Dismiss")
+                                    }
+                                }
+                            )
+                        }
+                        
                         val subtitleText = when (val state = uiState.modelState) {
-                            is ModelState.Loaded -> state.modelName.replace("(Alibaba)", "").trim()
-                            ModelState.Loading -> "Loading Model..."
+                            is ModelState.Loaded -> {
+                                val name = state.modelName.replace("(Alibaba)", "").trim()
+                                val backendInfo = if (uiState.lastNpuError != null) "${uiState.activeBackend} (NPU Error)" else uiState.activeBackend
+                                "$name ($backendInfo)"
+                            }
+                            ModelState.Loading -> uiState.loadingStage ?: "Loading Model..."
                             is ModelState.Error -> "Engine Error"
                             ModelState.Unloaded -> "No model loaded (Offline)"
                         }
-                        Text(
-                            text = subtitleText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = subtitleText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (uiState.lastNpuError != null && uiState.modelState is ModelState.Loaded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                            if (uiState.modelState is ModelState.Loaded && uiState.lastNpuError != null) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Error,
+                                    contentDescription = "View NPU Error Details",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable { showNpuErrorDialog = true }
+                                )
+                            }
+                        }
                     }
 
                     Row(
@@ -882,7 +922,7 @@ fun ChatBubble(message: ChatMessage) {
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = "${message.fileType?.uppercase() ?: "Document"} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ Tap to open",
+                                    text = "${message.fileType?.uppercase() ?: "Document"} \u2022 Tap to open",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
