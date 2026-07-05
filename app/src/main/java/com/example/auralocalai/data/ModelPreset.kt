@@ -1,4 +1,4 @@
-package com.example.auralocalai.data
+﻿package com.example.auralocalai.data
 
 import java.io.File
 import java.util.zip.ZipFile
@@ -6,7 +6,8 @@ import java.util.zip.ZipFile
 enum class LlmBackendRestriction {
     ANY,
     CPU_ONLY,
-    GPU_ONLY
+    GPU_ONLY,
+    NPU_ONLY
 }
 
 data class ModelPreset(
@@ -18,7 +19,7 @@ data class ModelPreset(
     val downloadUrl: String,
     val fileName: String,
     val requiresHfToken: Boolean = false,
-    val expectedExtension: String = ".task",
+    val expectedExtension: String = ".litertlm",
     val backendRestriction: LlmBackendRestriction = LlmBackendRestriction.ANY
 ) {
     companion object {
@@ -27,37 +28,24 @@ data class ModelPreset(
                 id = "deepseek-1.5b",
                 name = "DeepSeek-R1 Distill Qwen 1.5B",
                 description = "DeepSeek's powerful reasoning model distilled into Qwen architecture, outputting detailed chain-of-thought logic (Offline Reasoning).",
-                sizeLabel = "1.7 GB",
+                sizeLabel = "2.0 GB",
                 ramRequirement = "6 GB+ RAM",
-                downloadUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/deepseek_q8_ekv1280.task",
-                fileName = "deepseek-r1.task",
+                downloadUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm",
+                fileName = "deepseek-r1.litertlm",
                 requiresHfToken = false,
-                expectedExtension = ".task",
+                expectedExtension = ".litertlm",
                 backendRestriction = LlmBackendRestriction.ANY
             ),
             ModelPreset(
                 id = "qwen-1.5b",
                 name = "Qwen 2.5 1.5B Instruct",
                 description = "Alibaba's state-of-the-art multilingual LLM. Outperforms models of similar size in math, coding, and general knowledge (General Knowledge).",
-                sizeLabel = "1.5 GB",
+                sizeLabel = "1.8 GB",
                 ramRequirement = "6 GB+ RAM",
-                downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv1280.task",
-                fileName = "qwen-1.5b.task",
+                downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+                fileName = "qwen-1.5b.litertlm",
                 requiresHfToken = false,
-                expectedExtension = ".task",
-                backendRestriction = LlmBackendRestriction.ANY
-            ),
-            
-                        ModelPreset(
-                id = "qwen-0.5b",
-                name = "Qwen 2.5 0.5B Instruct",
-                description = "Alibaba's ultra-lightweight, fast on-device LLM (Ultra-Fast).",
-                sizeLabel = "0.5 GB",
-                ramRequirement = "4 GB+ RAM",
-                downloadUrl = "https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task",
-                fileName = "qwen-0.5b.task",
-                requiresHfToken = false,
-                expectedExtension = ".task",
+                expectedExtension = ".litertlm",
                 backendRestriction = LlmBackendRestriction.ANY
             ),
             ModelPreset(
@@ -84,7 +72,7 @@ data class ModelPreset(
                 expectedExtension = ".litertlm",
                 backendRestriction = LlmBackendRestriction.ANY
             ),
-ModelPreset(
+            ModelPreset(
                 id = "gemma4-e2b",
                 name = "Google Gemma 4 E2B Instruct (Multimodal)",
                 description = "Google's next-gen multimodal mobile LLM. Features advanced chain-of-thought logic, high-quality responses, and native multimodal support (Multimodal Vision).",
