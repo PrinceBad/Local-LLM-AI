@@ -1,4 +1,4 @@
-package com.example.auralocalai.ui.screens
+﻿package com.example.auralocalai.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -27,6 +27,12 @@ import androidx.compose.ui.unit.sp
 import com.example.auralocalai.data.DownloadState
 import com.example.auralocalai.ui.LlmViewModel
 import com.example.auralocalai.ui.ModelState
+import com.example.auralocalai.data.LlmBackendRestriction
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.Add
 import com.example.auralocalai.data.ModelPreset
 import java.util.Locale
 
@@ -38,9 +44,21 @@ fun ModelManagerScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var customUrl by remember { mutableStateOf("") }
-    var customFileName by remember { mutableStateOf("model.task") }
-    var isCustomExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var importStatusMessage by remember { mutableStateOf<String?>(null) }
+    var isImportSuccess by remember { mutableStateOf(true) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            importStatusMessage = "Importing model file..."
+            viewModel.importModelFile(context, uri) { success, message ->
+                isImportSuccess = success
+                importStatusMessage = message
+            }
+        }
+    }
     var modelToDelete by remember { mutableStateOf<ModelPreset?>(null) }
  
     Scaffold(
@@ -107,7 +125,7 @@ fun ModelManagerScreen(
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = if (isHfConfigured) "🔑 HF Token: Configured ✓" else "⚠ HF Token: Not Configured",
+                                    text = if (isHfConfigured) "\uD83D\uDD11 HF Token: Configured \u2713" else "\u26A0 HF Token: Not Configured",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (isHfConfigured) MaterialTheme.colorScheme.onTertiaryContainer
@@ -143,6 +161,7 @@ fun ModelManagerScreen(
                     isDownloading = isDownloading,
                     downloadState = uiState.downloadState,
                     modelState = uiState.modelState,
+                    loadingStage = uiState.loadingStage,
                     onDownload = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
                     onCancel = { viewModel.cancelDownload() },
@@ -150,7 +169,89 @@ fun ModelManagerScreen(
                 )
             }
 
-            // Custom Downloader Expandable Card
+            // Sideloaded Custom Models List
+            val customModels = uiState.localModels.filter { fileName ->
+                ModelPreset.presets.none { it.fileName == fileName }
+            }
+            if (customModels.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Sideloaded Custom Models",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    )
+                }
+
+                items(customModels) { fileName ->
+                    val isActive = uiState.activeModelId == fileName
+                    val isLoaded = uiState.modelState is ModelState.Loaded && isActive
+                    val isLoading = uiState.modelState is ModelState.Loading && isActive
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(
+                            width = if (isActive) 1.5.dp else 1.dp,
+                            color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = fileName,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Sideloaded offline model file.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                OutlinedButton(
+                                    onClick = { modelToDelete = ModelPreset(id = fileName, name = fileName, description = "Sideloaded offline model file.", sizeLabel = "Unknown size", ramRequirement = "Unknown RAM", downloadUrl = "", fileName = fileName, requiresHfToken = false, expectedExtension = "", backendRestriction = LlmBackendRestriction.ANY) },
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                                ) {
+                                    Text("Delete", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Button(
+                                    onClick = { viewModel.loadModel(fileName, fileName) },
+                                    enabled = !isLoading,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        text = if (isLoading) (uiState.loadingStage ?: "Loading...") else if (isLoaded) "Active" else "Load Model",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Local Model Importer Card
             item {
                 Card(
                     modifier = Modifier
@@ -164,81 +265,71 @@ fun ModelManagerScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { isCustomExpanded = !isCustomExpanded }
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                text = "Download Custom model (.task)",
+                                text = "Import Local Model File",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.secondary
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = if (isCustomExpanded) "Collapse ?" else "Expand ?",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
+                                text = "Directly load a compatible model file (.litertlm, .task, or .bin) from your device storage completely offline.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 15.sp
                             )
                         }
 
-                        AnimatedVisibility(visible = isCustomExpanded) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Button(
+                            onClick = { filePickerLauncher.launch("*/*") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp),
+                            shape = RoundedCornerShape(23.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Import"
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Select & Import File", fontWeight = FontWeight.Bold)
+                        }
+
+                        uiState.importProgress?.let { progress ->
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                LinearProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(4.dp)),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.outlineVariant
+                                )
                                 Text(
-                                    text = "Paste a direct download link for a compatible quantized LLM (.task file) e.g. from community servers.",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 16.sp
+                                    text = String.format(java.util.Locale.US, "%.0f%%", progress * 100),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-
-                                OutlinedTextField(
-                                    value = customUrl,
-                                    onValueChange = { customUrl = it },
-                                    label = { Text("Direct Model URL") },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                                        unfocusedBorderColor = Color(0xFFE2E8F0)
-                                    )
-                                )
-
-                                OutlinedTextField(
-                                    value = customFileName,
-                                    onValueChange = { customFileName = it },
-                                    label = { Text("Local Filename (must end in .task or .bin)") },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = MaterialTheme.colorScheme.secondary,
-                                        unfocusedBorderColor = Color(0xFFE2E8F0)
-                                    )
-                                )
-
-                                Button(
-                                    onClick = {
-                                        if (customUrl.isNotBlank() && (customFileName.endsWith(".task") || customFileName.endsWith(".bin"))) {
-                                            viewModel.downloadModelFromUrl(customUrl, customFileName)
-                                            customUrl = ""
-                                        }
-                                    },
-                                    enabled = customUrl.isNotBlank() && (customFileName.endsWith(".task") || customFileName.endsWith(".bin")) && uiState.currentDownloadingModelId == null,
-                                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                                    shape = RoundedCornerShape(23.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                                ) {
-                                    Text("Start Custom Download", fontWeight = FontWeight.Bold)
-                                }
                             }
+                        }
+
+                        importStatusMessage?.let { msg ->
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = msg,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isImportSuccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
                         }
                     }
                 }
@@ -279,6 +370,7 @@ fun PresetModelCard(
     isDownloading: Boolean,
     downloadState: DownloadState,
     modelState: ModelState,
+    loadingStage: String? = null,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
     onCancel: () -> Unit,
@@ -437,7 +529,7 @@ fun PresetModelCard(
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
                                     Text(
-                                        text = if (isLoading) "Loading..." else "Load Model",
+                                        text = if (isLoading) (loadingStage ?: "Loading…") else "Load Model",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
                                     )
