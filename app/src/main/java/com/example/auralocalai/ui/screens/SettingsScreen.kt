@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,7 @@ import android.content.pm.PackageManager
 import android.app.ActivityManager
 import android.os.Build
 import android.content.Context
+import java.io.File
 import com.example.auralocalai.ui.LlmViewModel
 import kotlinx.coroutines.launch
 
@@ -388,53 +390,96 @@ fun SettingsScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Text("Vulkan Support", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "Vulkan Support",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (diagnostics.vulkanSupported) "Supported (${diagnostics.vulkanVersion})" else "Unsupported",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (diagnostics.vulkanSupported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            color = if (diagnostics.vulkanSupported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.2f)
                         )
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Text("Qualcomm NPU Hardware", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            text = if (diagnostics.isNpuCapable) "Detected (Qualcomm Hexagon)" else "Not Detected / Unsupported",
+                            text = "Qualcomm NPU Hardware",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (diagnostics.isNpuCapable) {
+                                if (diagnostics.npuRuntimeReady) "Ready (Qualcomm Hexagon)" else "Detected — Runtime Missing"
+                            } else {
+                                "Not Detected"
+                            },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (diagnostics.isNpuCapable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            color = if (diagnostics.isNpuCapable) {
+                                if (diagnostics.npuRuntimeReady) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                            } else MaterialTheme.colorScheme.outline,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.2f)
                         )
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Text("Device RAM", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "Device RAM",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = String.format(java.util.Locale.US, "%.2f GB", diagnostics.totalRamGb),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.2f)
                         )
                     }
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Text("Supported ABIs", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "Supported ABIs",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = diagnostics.abis,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.2f)
                         )
                     }
                 }
@@ -557,6 +602,7 @@ data class DiagnosticInfo(
     val vulkanVersion: String,
     val totalRamGb: Double,
     val isNpuCapable: Boolean,
+    val npuRuntimeReady: Boolean,
     val abis: String
 )
 
@@ -611,5 +657,10 @@ fun getDiagnosticInfo(context: Context): DiagnosticInfo {
 
     val abis = Build.SUPPORTED_ABIS.joinToString(", ")
 
-    return DiagnosticInfo(hasVulkan, vulkanVer, totalRam, isNpu, abis)
+    // Check if NPU runtime dispatch library is actually available
+    val nativeLibDir = context.applicationInfo.nativeLibraryDir
+    val hasNpuDispatch = File(nativeLibDir, "libLiteRtDispatch_Qualcomm.so").exists()
+    val npuReady = isNpu && hasNpuDispatch
+
+    return DiagnosticInfo(hasVulkan, vulkanVer, totalRam, isNpu, npuReady, abis)
 }

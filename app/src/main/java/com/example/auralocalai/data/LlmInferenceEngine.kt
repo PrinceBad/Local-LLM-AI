@@ -94,7 +94,7 @@ class LlmInferenceEngine(private val context: Context) {
             val preset = ModelPreset.presets.firstOrNull { it.fileName.equals(modelFile.name, ignoreCase = true) }
             val restriction = preset?.backendRestriction
                 ?: if (modelPath.endsWith(".litertlm", ignoreCase = true)) {
-                    LlmBackendRestriction.ANY
+                    LlmBackendRestriction.GPU_ONLY
                 } else {
                     LlmBackendRestriction.ANY
                 }
@@ -123,14 +123,13 @@ class LlmInferenceEngine(private val context: Context) {
             // ============================================================
             val attemptNpu = isNpuCapableDevice &&
                 (restriction == LlmBackendRestriction.NPU_ONLY ||
-                 restriction == LlmBackendRestriction.ANY ||
                  restriction == LlmBackendRestriction.ANY)
             if (attemptNpu) {
                 onStageUpdate?.invoke("Snapdragon NPU detected \u2014 initializing NPU backend\u2026")
                 try {
                     val nativeLibDir = context.applicationInfo.nativeLibraryDir
                     try {
-                        val adspLibraryPath = "$nativeLibDir;/system/lib/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/dsp"
+                        val adspLibraryPath = "$nativeLibDir:/system/lib/rfsa/adsp:/system/vendor/lib/rfsa/adsp:/dsp"
                         android.system.Os.setenv("ADSP_LIBRARY_PATH", adspLibraryPath, true)
                         android.util.Log.d("LlmInferenceEngine", "Set ADSP_LIBRARY_PATH to: $adspLibraryPath")
                     } catch (envEx: Throwable) {
@@ -167,7 +166,7 @@ class LlmInferenceEngine(private val context: Context) {
             // STEP 2: Attempt GPU initialization (Vulkan)
             // ============================================================
             if (!loaded) {
-                val attemptGpu = (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.ANY)
+                val attemptGpu = (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.GPU_ONLY)
                 if (attemptGpu) {
                     val gpuStage = if (npuError != null) "NPU unavailable \u2014 initializing GPU backend\u2026" else "Initializing GPU backend\u2026"
                     onStageUpdate?.invoke(gpuStage)
