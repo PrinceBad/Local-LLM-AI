@@ -38,28 +38,7 @@ class LlmInferenceEngine(private val context: Context) {
      * Detects whether the device has a Qualcomm Snapdragon SoC with NPU (Hexagon HTP) support.
      * Uses Build.SOC_MODEL (API 31+) for precise detection, with Build.HARDWARE as fallback.
      */
-    private val isNpuCapableDevice: Boolean by lazy {
-        val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL.uppercase() else ""
-        val hardware = Build.HARDWARE.uppercase()
-        val board = Build.BOARD.uppercase()
-        
-        val combined = "$socModel|$hardware|$board"
-        
-        // 1. Check for Qualcomm Snapdragon model numbers (e.g. SM8650, SM8635, SM7675)
-        combined.contains("QCOM") || combined.contains("QUALCOMM") || combined.contains("SNAPDRAGON") || combined.contains("SM8") ||
-        combined.contains("SM7") ||
-        combined.contains("SM6") ||
-        // 2. Platform/SoC codenames
-        combined.contains("KONA") ||      // Snapdragon 865 / 870
-        combined.contains("LAHAINA") ||   // Snapdragon 888
-        combined.contains("TARO") ||      // Snapdragon 8 Gen 1
-        combined.contains("CAPE") ||      // Snapdragon 8+ Gen 1
-        combined.contains("KALAMA") ||    // Snapdragon 8 Gen 2
-        combined.contains("PINEAPPLE") || // Snapdragon 8 Gen 3
-        combined.contains("CLIFFS") ||    // Snapdragon 8s Gen 3 (SM8635)
-        combined.contains("PALAWAN") ||   // Snapdragon 8s Gen 3
-        combined.contains("SUN")          // Snapdragon 8 Elite / Gen 4
-    }
+    private val isNpuCapableDevice: Boolean = false
 
     /**
      * Loads the model asynchronously from the specified absolute file path.

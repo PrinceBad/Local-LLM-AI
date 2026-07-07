@@ -639,21 +639,7 @@ fun getDiagnosticInfo(context: Context): DiagnosticInfo {
     val hardware = Build.HARDWARE.uppercase()
     val board = Build.BOARD.uppercase()
     val combined = "$socModel|$hardware|$board"
-    val isNpu = combined.contains("QCOM") ||
-                 combined.contains("QUALCOMM") ||
-                 combined.contains("SNAPDRAGON") ||
-                 combined.contains("SM8") ||
-                 combined.contains("SM7") ||
-                 combined.contains("SM6") ||
-                 combined.contains("KONA") ||
-                 combined.contains("LAHAINA") ||
-                 combined.contains("TARO") ||
-                 combined.contains("CAPE") ||
-                 combined.contains("KALAMA") ||
-                 combined.contains("PINEAPPLE") ||
-                 combined.contains("CLIFFS") ||
-                 combined.contains("PALAWAN") ||
-                 combined.contains("SUN")
+    val isNpu = false
 
     val abis = Build.SUPPORTED_ABIS.joinToString(", ")
 
