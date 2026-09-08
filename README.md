@@ -109,7 +109,6 @@ To compile the application yourself, ensure you have Java 17 and Android SDK set
 # Set this to your own JDK 17 path
 $env:JAVA_HOME = "C:\path\to\your\jdk-17"
 ./gradlew assembleRelease
-./gradlew assembleRelease
 ```
 
 ---
