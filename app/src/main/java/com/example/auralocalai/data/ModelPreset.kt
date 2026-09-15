@@ -100,36 +100,4 @@ data class ModelPreset(
     }
 }
 
-fun isValidModelFile(file: File): Boolean {
-    if (!file.exists() || file.length() < 8L) return false
-    return try {
-        val bytes = ByteArray(8)
-        java.io.FileInputStream(file).use { it.read(bytes) }
-
-        // Standard ZIP archive (MediaPipe Task)
-        val isZip = bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte() &&
-                    bytes[2] == 0x03.toByte() && bytes[3] == 0x04.toByte()
-        
-        // Offset ZIP (Some HuggingFace hosted .task files prepend 4 zero bytes)
-        val isOffsetZip = bytes[4] == 'P'.code.toByte() && bytes[5] == 'K'.code.toByte() &&
-                          bytes[6] == 0x03.toByte() && bytes[7] == 0x04.toByte()
-
-        // RAW TFLite Flatbuffer
-        val isTfliteDirect = bytes[0] == 'T'.code.toByte() && bytes[1] == 'F'.code.toByte() &&
-                             bytes[2] == 'L'.code.toByte() && bytes[3] == '3'.code.toByte()
-
-        // Offset RAW TFLite Flatbuffer
-        val isTfliteOffset = bytes[4] == 'T'.code.toByte() && bytes[5] == 'F'.code.toByte() &&
-                             bytes[6] == 'L'.code.toByte() && bytes[7] == '3'.code.toByte()
-
-        // LITERTLM Bundle format ('LITERTLM' at offset 0)
-        val isLitertlm = bytes[0] == 'L'.code.toByte() && bytes[1] == 'I'.code.toByte() &&
-                         bytes[2] == 'T'.code.toByte() && bytes[3] == 'E'.code.toByte() &&
-                         bytes[4] == 'R'.code.toByte() && bytes[5] == 'T'.code.toByte() &&
-                         bytes[6] == 'L'.code.toByte() && bytes[7] == 'M'.code.toByte()
-
-        isZip || isOffsetZip || isTfliteDirect || isTfliteOffset || isLitertlm
-    } catch (e: Exception) {
-        false
-    }
-}
+fun isValidModelFile(file: File): Boolean = ModelSafetyValidator.isValidModelFile(file, minSizeBytes = 8L)
