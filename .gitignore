@@ -13,3 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Build, artifacts & temp binaries
+*.apk
+*.zip
+/jdk/
+/models/
+test.kt

@@ -30,6 +30,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     buildFeatures {
       compose = true
       aidl = false
@@ -94,6 +98,9 @@ dependencies {
 
   // Google AI Edge LiteRT for local LLM inference
   implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
+
+  // AndroidX Security Crypto for hardware-backed EncryptedSharedPreferences
+  implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
 
   implementation("androidx.compose.material:material-icons-core")
