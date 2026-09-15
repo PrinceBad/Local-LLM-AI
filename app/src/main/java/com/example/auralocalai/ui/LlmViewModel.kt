@@ -1,44 +1,49 @@
-﻿package com.example.auralocalai.ui
+package com.example.auralocalai.ui
 
 import android.app.Application
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.auralocalai.data.DownloadState
+import com.example.auralocalai.data.LlmBackendRestriction
 import com.example.auralocalai.data.LlmInferenceEngine
 import com.example.auralocalai.data.ModelDownloader
+import com.example.auralocalai.data.ModelDownloadService
 import com.example.auralocalai.data.ModelPreset
-import com.example.auralocalai.data.LlmBackendRestriction
+import com.example.auralocalai.data.ChatRepository
+import com.example.auralocalai.data.ModelSafetyValidator
+import com.example.auralocalai.security.TokenStorageCoordinator
+import com.example.auralocalai.security.TokenStorage
+import com.example.auralocalai.data.ServiceDownloadState
+import com.example.auralocalai.data.SocInfo
 import com.example.auralocalai.data.isValidModelFile
+import com.example.auralocalai.theme.ThemeMode
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
-import android.content.Context
-import android.content.Intent
-import com.example.auralocalai.data.ModelDownloadService
-import com.example.auralocalai.data.ServiceDownloadState
-import android.net.Uri
-import android.provider.OpenableColumns
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.pdf.PdfRenderer
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
+import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.builtins.ListSerializer
-import android.util.Log
-import com.example.auralocalai.theme.ThemeMode
 
 @Serializable
 data class ChatMessage(
@@ -82,47 +87,39 @@ data class UiState(
     val isAttachmentProcessing: Boolean = false,
     val attachmentError: String? = null,
     val hfToken: String = "",
+    val isKeystoreDegraded: Boolean = false,
     val contextWindowSize: Int = 6,
     val systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val loadingStage: String? = null,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val preferredBackend: String = "AUTO",
+    val socInfo: SocInfo? = null,
     val importProgress: Float? = null
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-    private val historyFile = File(application.filesDir, "chat_history.json")
+    private val chatRepository = ChatRepository(application.filesDir)
+    private val tokenStorage: TokenStorage = TokenStorageCoordinator.create(application.applicationContext)
 
     private fun saveMessages(messages: List<ChatMessage>) {
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val jsonString = json.encodeToString(ListSerializer(ChatMessage.serializer()), messages)
-                historyFile.writeText(jsonString)
-            } catch (e: Exception) {
-                Log.e("LlmViewModel", "Failed to save chat history", e)
-            }
-        }
-    }
-
-    private fun loadMessages(): List<ChatMessage> {
-        if (!historyFile.exists()) return emptyList()
-        return try {
-            val jsonString = historyFile.readText()
-            json.decodeFromString(ListSerializer(ChatMessage.serializer()), jsonString)
-        } catch (e: Exception) {
-            Log.e("LlmViewModel", "Failed to load chat history", e)
-            emptyList()
+            chatRepository.saveMessages(messages)
         }
     }
 
     private val _uiState = MutableStateFlow(UiState())
 
     init {
-        // Load chat history off the main thread to avoid disk I/O on the main thread during init
+        // Load chat history & Token off the main thread to avoid disk I/O on the main thread during init
         viewModelScope.launch(Dispatchers.IO) {
-            val history = loadMessages()
-            _uiState.update { it.copy(messages = history) }
+            val history = chatRepository.loadMessages()
+            val token = tokenStorage.getToken()
+            val degraded = !tokenStorage.isHardwareEncrypted
+            _uiState.update { it.copy(messages = history, hfToken = token, isKeystoreDegraded = degraded) }
+
+            // Sweep incomplete or corrupted artifacts asynchronously on Dispatchers.IO (prevents cold-start ANRs)
+            ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(storageDir)
         }
     }
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -184,16 +181,19 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         migrateExistingModels()
         refreshDownloadedModels()
 
-        // Initialize hfToken, contextWindowSize, and systemPrompt from SharedPreferences
+        // Initialize hfToken, contextWindowSize, systemPrompt, and preferredBackend from SharedPreferences
         val prefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         val initialHfToken = prefs.getString("hf_token", "") ?: ""
         val initialContextWindow = prefs.getInt("context_window_size", 6)
         val initialSystemPrompt = prefs.getString("system_prompt", DEFAULT_SYSTEM_PROMPT) ?: DEFAULT_SYSTEM_PROMPT
+        val initialPreferredBackend = prefs.getString("preferred_backend", "AUTO") ?: "AUTO"
         _uiState.update { 
             it.copy(
                 hfToken = initialHfToken,
                 contextWindowSize = initialContextWindow,
-                systemPrompt = initialSystemPrompt
+                systemPrompt = initialSystemPrompt,
+                preferredBackend = initialPreferredBackend,
+                socInfo = inferenceEngine.socInfo
             ) 
         }
 
@@ -265,9 +265,11 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     val modelName = matchingPreset?.name ?: firstDownloaded
                     val modelId = matchingPreset?.id ?: firstDownloaded
                     
-                    _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model fileâ€¦") }
+                    _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model file\u2026") }
                     val result = inferenceEngine.loadModel(
                         modelPath = File(storageDir, firstDownloaded).absolutePath,
+                        preferredBackend = initialPreferredBackend,
+                        contextTurns = initialContextWindow,
                         onStageUpdate = { stage ->
                             _uiState.update { it.copy(loadingStage = stage) }
                         }
@@ -316,10 +318,6 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 downloadState = DownloadState.Idle
             )
         }
-
-          val tempFile = File(storageDir, "$fileName.tmp")
-        val destFile = File(storageDir, fileName)
-        // Note: do NOT pre-delete tempFile - ModelDownloader supports resuming partial downloads
 
         val context = getApplication<Application>().applicationContext
         // Read HF token from SharedPreferences (set by user in Settings)
@@ -418,6 +416,20 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(systemPrompt = prompt) }
     }
 
+    fun setPreferredBackend(backend: String) {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("preferred_backend", backend).apply()
+        _uiState.update { it.copy(preferredBackend = backend) }
+
+        // If a model is currently loaded, re-load with new backend preference
+        val activeId = _uiState.value.activeModelId
+        val activePreset = ModelPreset.presets.firstOrNull { it.id == activeId }
+        val fileName = activePreset?.fileName ?: _uiState.value.localModels.firstOrNull()
+        if (fileName != null && activeId != null) {
+            loadModel(fileName, activeId)
+        }
+    }
+
     fun stopGeneration() {
         inferenceJob?.cancel()
         _uiState.update { it.copy(isGenerating = false) }
@@ -437,53 +449,46 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Maps raw engine exceptions to clear, actionable messages for end users.
-     * Keeps the original technical detail in a collapsed suffix for advanced debugging.
      */
     private fun friendlyErrorMessage(raw: String?): String {
         if (raw.isNullOrBlank()) return "An unknown error occurred while loading the model. Please try again."
 
         val lower = raw.lowercase()
         return when {
-            // NPU dispatch libraries not found or NPU initialization failed
-            lower.contains("dispatch runtime") || lower.contains("npu") && lower.contains("failed") ->
-                "NPU acceleration is not available on this device. The app will use GPU or CPU instead."
-
-            // GPU-locked model tried CPU fallback or backend constraint mismatch
-            lower.contains("backend restriction") || lower.contains("gpu_only") ||
-            lower.contains("invalid_argument") && lower.contains("cpu") ->
-                "This model requires a GPU with Vulkan support. CPU execution is not available for this format."
-
             // Out of memory / resource exhaustion
             lower.contains("resource_exhausted") || lower.contains("out of memory") ||
             lower.contains("oom") || lower.contains("insufficient memory") ->
-                "Not enough GPU memory to load this model. Try closing other apps or switching to a smaller model."
+                "Not enough device/GPU memory to load this model. Try closing background apps or switching to a smaller model (e.g. Qwen 1.5B or DeepSeek 1.5B)."
 
             // File corruption or validation failure
             lower.contains("corrupted") || lower.contains("incomplete") ||
             lower.contains("not a valid model") || lower.contains("flatbuffer") ||
             lower.contains("tfl3") || lower.contains("zip archive") ->
-                "The model file appears to be corrupted or incomplete. Please delete it and re-download."
+                "The model file appears to be incomplete or corrupted. Please delete it in Manage Models and re-download."
 
             // Model file missing
-            lower.contains("does not exist") ->
-                "Model file not found on disk. It may have been moved or deleted. Please re-download."
+            lower.contains("does not exist") || lower.contains("no such file") ->
+                "Model file was not found on disk. Please download a model from the Models catalog."
 
             // Emulator / architecture guard
             lower.contains("emulator") || lower.contains("x86") ->
                 "On-device LLM inference is not supported on emulators. Please use a physical ARM64 device."
 
             // RAM insufficient for CPU path
-            lower.contains("inference aborted") || lower.contains("ram") && lower.contains("prevent") ->
-                "This device does not have enough RAM to run this model safely. Try a smaller model (e.g. Qwen 0.5B)."
+            lower.contains("inference aborted") || (lower.contains("ram") && lower.contains("prevent")) ->
+                "This device does not have enough RAM to run this model safely. Try a smaller model."
 
-            // GPU init failure with a meaningful inner message
-            lower.contains("failed to load model on gpu") ->
-                "GPU initialization failed. Your device GPU may not support this model. " +
-                "Check that your GPU drivers are up to date or try a smaller model."
+            // GPU init failure or backend restriction
+            lower.contains("backend restriction") || lower.contains("gpu_only") ->
+                "This model requires Vulkan GPU acceleration. Check your GPU backend settings."
 
-            // Catch-all: return the original but trim excessive length
+            // Specific NPU only failure
+            lower.contains("npu backend was preferred") ->
+                "NPU acceleration was requested, but Qualcomm QNN runtime is not available for this model. Switch to Auto or GPU in Settings."
+
+            // Catch-all: return the original trimmed if too long
             else -> {
-                val trimmed = if (raw.length > 200) raw.take(200) + "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" else raw
+                val trimmed = if (raw.length > 250) raw.take(250) + "…" else raw
                 "Model loading failed: $trimmed"
             }
         }
@@ -491,12 +496,14 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadModel(fileName: String, modelId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model fileâ€¦") }
+            _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model file\u2026") }
             val matchingPreset = ModelPreset.presets.firstOrNull { it.id == modelId }
             val displayName = matchingPreset?.name ?: fileName
 
             val result = inferenceEngine.loadModel(
                 modelPath = File(storageDir, fileName).absolutePath,
+                preferredBackend = _uiState.value.preferredBackend,
+                contextTurns = _uiState.value.contextWindowSize,
                 onStageUpdate = { stage ->
                     _uiState.update { it.copy(loadingStage = stage) }
                 }
@@ -927,7 +934,3 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         inferenceEngine.close()
     }
 }
-
-
-
-

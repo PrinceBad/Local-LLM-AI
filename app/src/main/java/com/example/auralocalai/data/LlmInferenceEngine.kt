@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.data
+package com.example.auralocalai.data
 
 import android.app.ActivityManager
 import android.content.Context
@@ -35,17 +35,23 @@ class LlmInferenceEngine(private val context: Context) {
         get() = engine != null
 
     /**
-     * Detects whether the device has a Qualcomm Snapdragon SoC with NPU (Hexagon HTP) support.
-     * Uses Build.SOC_MODEL (API 31+) for precise detection, with Build.HARDWARE as fallback.
+     * Dynamically detects SoC model and Qualcomm Hexagon NPU capability via SocDetector.
      */
-    private val isNpuCapableDevice: Boolean = false
+    val socInfo: SocInfo by lazy {
+        SocDetector.detectSoc(context)
+    }
 
     /**
      * Loads the model asynchronously from the specified absolute file path.
      * Shuts down any previously loaded model.
-     * Uses a 3-tier loading waterfall: NPU -> GPU -> CPU
+     * Uses a 3-tier loading waterfall: NPU -> GPU -> CPU (configurable via preferredBackend)
      */
-    suspend fun loadModel(modelPath: String, onStageUpdate: ((String) -> Unit)? = null): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun loadModel(
+        modelPath: String,
+        preferredBackend: String = "AUTO",
+        contextTurns: Int = 6,
+        onStageUpdate: ((String) -> Unit)? = null
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             // Close previous session
             close()
@@ -100,15 +106,23 @@ class LlmInferenceEngine(private val context: Context) {
             // ============================================================
             // STEP 1: Attempt NPU initialization (Qualcomm Hexagon HTP)
             // ============================================================
-            val attemptNpu = isNpuCapableDevice &&
-                (restriction == LlmBackendRestriction.NPU_ONLY ||
-                 restriction == LlmBackendRestriction.ANY)
-            if (attemptNpu) {
-                onStageUpdate?.invoke("Snapdragon NPU detected \u2014 initializing NPU backend\u2026")
+            val canAttemptNpu = socInfo.isQnnRuntimeAvailable &&
+                (preferredBackend == "AUTO" || preferredBackend == "NPU_ONLY") &&
+                (restriction == LlmBackendRestriction.NPU_ONLY || restriction == LlmBackendRestriction.ANY)
+
+            if (preferredBackend == "NPU_ONLY" && !socInfo.isQnnRuntimeAvailable) {
+                return@withContext Result.failure(Exception(
+                    "NPU backend was preferred, but Qualcomm QNN runtime is not available (${socInfo.qnnDetails}). Please select Auto or GPU backend."
+                ))
+            }
+            
+            if (canAttemptNpu) {
+                val htpLabel = if (socInfo.htpVersion != HtpVersion.UNKNOWN) " (${socInfo.htpVersion.label})" else ""
+                onStageUpdate?.invoke("${socInfo.marketingName} NPU detected$htpLabel \u2014 initializing NPU backend\u2026")
                 try {
                     val nativeLibDir = context.applicationInfo.nativeLibraryDir
                     try {
-                        val adspLibraryPath = "$nativeLibDir:/system/lib/rfsa/adsp:/system/vendor/lib/rfsa/adsp:/dsp"
+                        val adspLibraryPath = "$nativeLibDir:/system/lib/rfsa/adsp:/system/vendor/lib/rfsa/adsp:/vendor/dsp/cdsp:/dsp"
                         android.system.Os.setenv("ADSP_LIBRARY_PATH", adspLibraryPath, true)
                         android.util.Log.d("LlmInferenceEngine", "Set ADSP_LIBRARY_PATH to: $adspLibraryPath")
                     } catch (envEx: Throwable) {
@@ -130,12 +144,11 @@ class LlmInferenceEngine(private val context: Context) {
                     npuError = e
                     lastNpuError = e
                     android.util.Log.e("LlmInferenceEngine", "Failed to load model on NPU", e)
-                    // NPU failed â€” fall through to GPU
-                    // If restriction is NPU_ONLY, fail immediately
-                    if (restriction == LlmBackendRestriction.NPU_ONLY) {
+                    // NPU failed — fall through to GPU unless NPU_ONLY is enforced
+                    if (restriction == LlmBackendRestriction.NPU_ONLY || preferredBackend == "NPU_ONLY") {
                         return@withContext Result.failure(Exception(
                             "Failed to load model on NPU: ${e.localizedMessage}. " +
-                            "Backend restriction (NPU_ONLY) prevents fallback.", e
+                            "Backend restriction or preference prevents fallback.", e
                         ))
                     }
                 }
@@ -145,47 +158,66 @@ class LlmInferenceEngine(private val context: Context) {
             // STEP 2: Attempt GPU initialization (Vulkan)
             // ============================================================
             if (!loaded) {
-                val attemptGpu = (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.GPU_ONLY)
+                val attemptGpu = (preferredBackend == "AUTO" || preferredBackend == "GPU_ONLY") &&
+                    (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.GPU_ONLY)
                 if (attemptGpu) {
-                    val gpuStage = if (npuError != null) "NPU unavailable \u2014 initializing GPU backend\u2026" else "Initializing GPU backend\u2026"
-                    onStageUpdate?.invoke(gpuStage)
-                    try {
-                        val config = EngineConfig(
-                            modelPath = modelPath,
-                            backend = Backend.GPU(),
-                            cacheDir = context.cacheDir.absolutePath
-                        )
-                        val newEngine = Engine(config)
-                        newEngine.initialize()
-                        engine = newEngine
-                        conversation = newEngine.createConversation()
-                        currentModelPath = modelPath
-                        activeBackend = "GPU"
-                        loaded = true
-                    } catch (e: Throwable) {
-                        gpuError = e
-                        // If CPU fallback is NOT allowed, fail immediately
-                        if (restriction != LlmBackendRestriction.ANY) {
-                            val msg = buildString {
-                                if (npuError != null) append("NPU failed: ${npuError.localizedMessage}. ")
-                                append("GPU failed: ${e.localizedMessage}. ")
-                                append("Backend restriction ($restriction) prevents fallback to CPU.")
-                            }
-                            return@withContext Result.failure(Exception(msg, e))
+                    // Pre-flight GPU RAM guard: accounts for weight staging & Android Vulkan buffer duplication (LiteRT-LM #3507)
+                    val gpuRamCheck = ModelSafetyValidator.verifyDeviceRamForInference(
+                        context = context,
+                        preset = preset,
+                        isGpu = true,
+                        modelFile = modelFile,
+                        contextTurns = contextTurns
+                    )
+                    if (gpuRamCheck.isFailure) {
+                        val ramError = gpuRamCheck.exceptionOrNull() ?: Exception("Insufficient available RAM for GPU initialization")
+                        android.util.Log.w("LlmInferenceEngine", "GPU RAM check failed: ${ramError.message}")
+                        if (restriction != LlmBackendRestriction.ANY || preferredBackend == "GPU_ONLY") {
+                            return@withContext Result.failure(ramError)
                         }
+                        gpuError = ramError
+                    } else {
+                        val gpuStage = if (npuError != null) "NPU unavailable — initializing GPU backend…" else "Initializing GPU backend…"
+                        onStageUpdate?.invoke(gpuStage)
+                        try {
+                            val config = EngineConfig(
+                                modelPath = modelPath,
+                                backend = Backend.GPU(),
+                                cacheDir = context.cacheDir.absolutePath
+                            )
+                            val newEngine = Engine(config)
+                            newEngine.initialize()
+                            engine = newEngine
+                            conversation = newEngine.createConversation()
+                            currentModelPath = modelPath
+                            activeBackend = "GPU"
+                            loaded = true
+                        } catch (e: Throwable) {
+                            gpuError = e
+                            // If CPU fallback is NOT allowed or GPU_ONLY is preferred, fail immediately
+                            if (restriction != LlmBackendRestriction.ANY || preferredBackend == "GPU_ONLY") {
+                                val msg = buildString {
+                                    if (npuError != null) append("NPU failed: ${npuError.localizedMessage}. ")
+                                    append("GPU failed: ${e.localizedMessage}. ")
+                                    append("Backend restriction ($restriction) or preference ($preferredBackend) prevents fallback to CPU.")
+                                }
+                                return@withContext Result.failure(Exception(msg, e))
+                            }
                     }
                 }
+            }
             }
 
             // ============================================================
             // STEP 3: Attempt CPU fallback
             // ============================================================
             if (!loaded) {
-                val attemptCpu = (restriction == LlmBackendRestriction.CPU_ONLY || restriction == LlmBackendRestriction.ANY)
+                val attemptCpu = (preferredBackend == "AUTO" || preferredBackend == "CPU_ONLY") &&
+                    (restriction == LlmBackendRestriction.CPU_ONLY || restriction == LlmBackendRestriction.ANY)
                 if (attemptCpu) {
                     onStageUpdate?.invoke("GPU unavailable \u2014 checking device RAM for CPU fallback\u2026")
                     // Check RAM size before committing to CPU execution to prevent native OOM crashes
-                    val ramCheck = verifyDeviceRamForCpu(preset)
+                    val ramCheck = verifyDeviceRamForCpu(preset, modelFile, contextTurns)
                     if (ramCheck.isFailure) {
                         val ramError = ramCheck.exceptionOrNull() ?: Exception("RAM check failed for CPU execution")
                         return@withContext Result.failure(ramError)
@@ -216,7 +248,7 @@ class LlmInferenceEngine(private val context: Context) {
                     }
                 } else {
                     return@withContext Result.failure(Exception(
-                        "Model loading failed. Backend restriction ($restriction) does not permit CPU loading."
+                        "Model loading failed. Backend restriction ($restriction) or preference ($preferredBackend) does not permit CPU loading."
                     ))
                 }
             }
@@ -231,35 +263,8 @@ class LlmInferenceEngine(private val context: Context) {
      * Checks if the device has at least 8 GB of total RAM.
      * Throws an explicit exception if RAM is insufficient, avoiding a silent native OS OOM kill.
      */
-    private fun verifyDeviceRamForCpu(preset: ModelPreset?): Result<Unit> {
-        return try {
-            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-            if (activityManager == null) {
-                return Result.success(Unit)
-            }
-
-            val memoryInfo = ActivityManager.MemoryInfo()
-            activityManager.getMemoryInfo(memoryInfo)
-            val totalRamBytes = memoryInfo.totalMem
-            
-            var requiredGb = 6.0
-            if (preset != null) {
-                if (preset.ramRequirement.contains("8 GB")) requiredGb = 8.0
-                else if (preset.ramRequirement.contains("6 GB")) requiredGb = 6.0
-                else if (preset.ramRequirement.contains("4 GB")) requiredGb = 4.0
-            }
-            
-            val thresholdGb = requiredGb - 1.5
-            val minRequiredRamBytes = (thresholdGb * 1024 * 1024 * 1024).toLong()
-
-            if (totalRamBytes < minRequiredRamBytes) {
-                val actualRamGb = String.format("%.2f", totalRamBytes.toDouble() / (1024 * 1024 * 1024))
-                android.util.Log.w("LlmInferenceEngine", "Low RAM Warning: Device has only $actualRamGb GB RAM but model recommends ${String.format("%.1f", requiredGb)} GB. Proceeding with CPU fallback anyway.")
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(Exception("Failed to evaluate device memory configuration: ${e.localizedMessage}", e))
-        }
+    private fun verifyDeviceRamForCpu(preset: ModelPreset?, modelFile: File? = null, contextTurns: Int = 6): Result<Unit> {
+        return ModelSafetyValidator.verifyDeviceRamForInference(context, preset, isGpu = false, modelFile = modelFile, contextTurns = contextTurns)
     }
 
 
@@ -296,6 +301,15 @@ class LlmInferenceEngine(private val context: Context) {
         if (currentConversation == null) {
             close(Exception("Model not loaded yet. Please load a model first."))
             return@callbackFlow
+        }
+
+        // Multimodal memory pre-flight guard: ensure headroom for vision tower & image patch embeddings
+        if (image != null) {
+            val multimodalRamCheck = ModelSafetyValidator.verifyAvailableRamForMultimodal(context)
+            if (multimodalRamCheck.isFailure) {
+                close(multimodalRamCheck.exceptionOrNull() ?: Exception("Insufficient available memory for vision processing"))
+                return@callbackFlow
+            }
         }
 
         try {

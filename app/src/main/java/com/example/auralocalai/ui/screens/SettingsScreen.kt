@@ -1,7 +1,8 @@
-﻿package com.example.auralocalai.ui.screens
+package com.example.auralocalai.ui.screens
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
@@ -33,6 +34,13 @@ import android.content.Context
 import java.io.File
 import com.example.auralocalai.ui.LlmViewModel
 import kotlinx.coroutines.launch
+
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Memory
+import com.example.auralocalai.data.SocDetector
+import com.example.auralocalai.data.SocInfo
+import com.example.auralocalai.data.HtpVersion
+import com.example.auralocalai.data.SocVendor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -190,7 +198,7 @@ fun SettingsScreen(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = if (isConfigured) "Configured âœ“" else "Not Configured",
+                                text = if (isConfigured) "Configured ✓" else "Not Configured",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isConfigured) MaterialTheme.colorScheme.onTertiaryContainer
@@ -319,7 +327,7 @@ fun SettingsScreen(
 
             // Appearance Card
             Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shape = RoundedCornerShape(20.dp),
@@ -371,6 +379,79 @@ fun SettingsScreen(
                 }
             }
 
+            // Hardware Acceleration Backend Selector Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Hardware Acceleration Backend",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Choose your preferred LLM execution engine. By default, Auto selects the fastest available backend (NPU → GPU → CPU).",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        lineHeight = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    val backendOptions = listOf(
+                        "AUTO" to "Auto (Recommended: NPU \u2192 GPU \u2192 CPU)",
+                        "GPU_ONLY" to "GPU Only (Vulkan Acceleration)",
+                        "NPU_ONLY" to "NPU Only (Snapdragon Hexagon HTP)",
+                        "CPU_ONLY" to "CPU Only (Multithreaded Fallback)"
+                    )
+
+                    Column {
+                        backendOptions.forEach { (backendKey, label) ->
+                            val isNpuOption = backendKey == "NPU_ONLY"
+                            val isOptionAvailable = !isNpuOption || diagnostics.socInfo.isNpuHardwarePresent
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = isOptionAvailable) {
+                                        viewModel.setPreferredBackend(backendKey)
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = uiState.preferredBackend == backendKey,
+                                    onClick = { viewModel.setPreferredBackend(backendKey) },
+                                    enabled = isOptionAvailable,
+                                    colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = label,
+                                        fontSize = 13.sp,
+                                        color = if (isOptionAvailable) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                                        fontWeight = if (uiState.preferredBackend == backendKey) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    if (isNpuOption && !diagnostics.socInfo.isNpuHardwarePresent) {
+                                        Text(
+                                            text = "Snapdragon Hexagon HTP not detected on this device",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // System Diagnostics Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -381,7 +462,7 @@ fun SettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "System Diagnostics",
+                        text = "System Diagnostics & Hardware",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -394,7 +475,77 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.Top
                     ) {
                         Text(
-                            text = "Vulkan Support",
+                            text = "Processor SoC",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = diagnostics.socInfo.marketingName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.3f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = "Hexagon NPU Hardware",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (diagnostics.socInfo.isNpuHardwarePresent) {
+                                "${diagnostics.socInfo.htpVersion.label}"
+                            } else {
+                                "Not Detected (${diagnostics.socInfo.vendor.name})"
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (diagnostics.socInfo.isNpuHardwarePresent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.3f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = "NPU Runtime Status",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = diagnostics.socInfo.qnnDetails,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (diagnostics.socInfo.isQnnRuntimeAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1.3f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = "Vulkan GPU Acceleration",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
@@ -406,7 +557,7 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Bold,
                             color = if (diagnostics.vulkanSupported) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1.2f)
+                            modifier = Modifier.weight(1.3f)
                         )
                     }
 
@@ -416,36 +567,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.Top
                     ) {
                         Text(
-                            text = "Qualcomm NPU Hardware",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (diagnostics.isNpuCapable) {
-                                if (diagnostics.npuRuntimeReady) "Ready (Qualcomm Hexagon)" else "Detected — Runtime Missing"
-                            } else {
-                                "Not Detected"
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (diagnostics.isNpuCapable) {
-                                if (diagnostics.npuRuntimeReady) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                            } else MaterialTheme.colorScheme.outline,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1.2f)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Text(
-                            text = "Device RAM",
+                            text = "Physical RAM",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
@@ -457,7 +579,7 @@ fun SettingsScreen(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1.2f)
+                            modifier = Modifier.weight(1.3f)
                         )
                     }
 
@@ -467,7 +589,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.Top
                     ) {
                         Text(
-                            text = "Supported ABIs",
+                            text = "Target Architecture",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
@@ -479,7 +601,7 @@ fun SettingsScreen(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1.2f)
+                            modifier = Modifier.weight(1.3f)
                         )
                     }
                 }
@@ -596,13 +718,11 @@ fun SettingsScreen(
     }
 }
 
-
 data class DiagnosticInfo(
     val vulkanSupported: Boolean,
     val vulkanVersion: String,
     val totalRamGb: Double,
-    val isNpuCapable: Boolean,
-    val npuRuntimeReady: Boolean,
+    val socInfo: SocInfo,
     val abis: String
 )
 
@@ -635,18 +755,8 @@ fun getDiagnosticInfo(context: Context): DiagnosticInfo {
         totalRam = memoryInfo.totalMem.toDouble() / (1024 * 1024 * 1024)
     }
 
-    val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL.uppercase() else ""
-    val hardware = Build.HARDWARE.uppercase()
-    val board = Build.BOARD.uppercase()
-    val combined = "$socModel|$hardware|$board"
-    val isNpu = false
-
     val abis = Build.SUPPORTED_ABIS.joinToString(", ")
+    val socInfo = SocDetector.detectSoc(context)
 
-    // Check if NPU runtime dispatch library is actually available
-    val nativeLibDir = context.applicationInfo.nativeLibraryDir
-    val hasNpuDispatch = File(nativeLibDir, "libLiteRtDispatch_Qualcomm.so").exists()
-    val npuReady = isNpu && hasNpuDispatch
-
-    return DiagnosticInfo(hasVulkan, vulkanVer, totalRam, isNpu, npuReady, abis)
+    return DiagnosticInfo(hasVulkan, vulkanVer, totalRam, socInfo, abis)
 }

@@ -832,7 +832,6 @@ fun ChatBubble(message: ChatMessage) {
                 
                 if (message.videoUri != null) {
                     val context = LocalContext.current
-    var showAttachmentMenu by remember { mutableStateOf(false) }
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
@@ -883,7 +882,6 @@ fun ChatBubble(message: ChatMessage) {
 
                 if (message.fileUri != null) {
                     val context = LocalContext.current
-    var showAttachmentMenu by remember { mutableStateOf(false) }
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
