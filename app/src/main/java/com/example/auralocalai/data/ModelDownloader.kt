@@ -78,7 +78,7 @@ class ModelDownloader {
      * Returns true if the given URL is an AWS pre-signed URL.
      * We should never attach Authorization headers to pre-signed URLs.
      */
-    private fun isPresignedUrl(url: okhttp3.HttpUrl): Boolean {
+    fun isPresignedUrl(url: okhttp3.HttpUrl): Boolean {
         val query = url.query ?: return false
         return query.contains("Signature=") || 
                query.contains("X-Amz-Signature=") || 
@@ -89,7 +89,7 @@ class ModelDownloader {
      * Returns true if the given hostname is a core HuggingFace domain.
      * Auth headers should ONLY be sent to core auth endpoints.
      */
-    private fun isHuggingFaceDomain(host: String): Boolean {
+    fun isHuggingFaceDomain(host: String): Boolean {
         return host == "huggingface.co" || host == "hf.co" || 
                host == "api-face.huggingface.co" || host == "api.huggingface.co"
     }
@@ -146,7 +146,7 @@ class ModelDownloader {
         throw IOException("Too many redirects (>$maxRedirects)")
     }
 
-    fun downloadModel(url: String, destinationFile: File, hfToken: String = ""): Flow<DownloadState> = flow {
+    fun downloadModel(url: String, destinationFile: File, hfToken: String = "", expectedSha256: String? = null): Flow<DownloadState> = flow {
         Log.i(TAG, "Preparing download from $url")
         var response: Response? = null
         var downloadedBytes = 0L
@@ -337,12 +337,28 @@ class ModelDownloader {
             }
         }
 
-        // Run integrity validation check on downloaded model package
-        if (!isValidModelFile(destinationFile)) {
-            Log.e(TAG, "Integrity check failed for: ${destinationFile.absolutePath}")
-            destinationFile.delete()
-            emit(DownloadState.Error("Downloaded file is corrupted or is not a valid model package (failed Flatbuffer/ZIP structure validation). Please delete and re-download."))
-            return@flow
+        // Post-completion integrity and full-pass SHA-256 validation
+        val integrityResult = ModelSafetyValidator.verifyModelIntegrity(
+            file = destinationFile,
+            expectedSha256 = expectedSha256,
+            minSizeBytes = 1024L
+        )
+        when (integrityResult) {
+            is IntegrityResult.StructuralFailure -> {
+                Log.e(TAG, "Integrity check failed: ${integrityResult.reason}")
+                destinationFile.delete()
+                emit(DownloadState.Error("Downloaded file is corrupted: ${integrityResult.reason}. Please delete and re-download."))
+                return@flow
+            }
+            is IntegrityResult.ChecksumMismatch -> {
+                Log.e(TAG, "Checksum mismatch: expected ${integrityResult.expected}, got ${integrityResult.actual}")
+                destinationFile.delete()
+                emit(DownloadState.Error("Checksum mismatch: Expected ${integrityResult.expected}, got ${integrityResult.actual}. Corrupted file removed."))
+                return@flow
+            }
+            is IntegrityResult.Success -> {
+                Log.i(TAG, "Model validation passed for: ${destinationFile.name}")
+            }
         }
 
         Log.i(TAG, "Download complete. Total bytes: $downloadedBytes")

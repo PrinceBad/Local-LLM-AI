@@ -95,14 +95,7 @@ class ModelDownloadService : Service() {
                         updateProgressNotification(modelId, fileName, state.percentage, state.speedBytesPerSec)
                     }
                     is DownloadState.Success -> {
-                        val renameSuccess = try {
-                            if (destFile.exists()) {
-                                destFile.delete()
-                            }
-                            tempFile.renameTo(destFile)
-                        } catch (e: Exception) {
-                            false
-                        }
+                        val renameSuccess = ModelSafetyValidator.moveFileSafely(tempFile, destFile)
 
                         if (renameSuccess) {
                             downloadState.value = ServiceDownloadState.Success(
