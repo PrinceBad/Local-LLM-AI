@@ -107,7 +107,7 @@ data class ModelPreset(
                 name = "Google Gemma 4 E4B Instruct (Multimodal)",
                 description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support (High-Res Multimodal).",
                 sizeLabel = "3.4 GB",
-                ramRequirement = "8 GB+ RAM",
+                ramRequirement = "12 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
                 fileName = "gemma4-e4b.litertlm",
                 requiresHfToken = false,

@@ -125,6 +125,7 @@ class TelemetryBenchmarkTest {
         val gemmaE4b = presets.first { it.id == "gemma4-e4b" }
         assertEquals("mixed 2/4/8-bit", gemmaE4b.quantization)
         assertEquals("4.0B", gemmaE4b.parameterCount)
+        assertEquals("12 GB+ RAM", gemmaE4b.ramRequirement)
     }
 
     @Test
