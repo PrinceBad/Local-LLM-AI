@@ -42,7 +42,7 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 | Text & Reasoning Models | Multimodal & Coding Models |
 | --- | --- |
-| **DeepSeek-R1 Distill Qwen 1.5B**<br/>• Parameters: 1.5B \| Size: ~1.7 GB<br/>• Min. RAM: 6 GB+ (Offline Reasoning) | **Qwen 2.5 Coder 3B Instruct**<br/>• Parameters: 3B \| Size: ~2.9 GB<br/>• Min. RAM: 6 GB+ (Coding Expert) |
+| **DeepSeek-R1 Distill Qwen 1.5B**<br/>• Parameters: 1.5B \| Size: ~1.7 GB<br/>• Min. RAM: 6 GB+ (Offline Reasoning) | **Qwen 2.5 Coder 3B Instruct**<br/>• Parameters: 3B \| Size: ~2.9 GB<br/>• Min. RAM: 8 GB+ (Coding Expert) |
 | **Qwen 2.5 1.5B Instruct**<br/>• Parameters: 1.5B \| Size: ~1.5 GB<br/>• Min. RAM: 6 GB+ (General Knowledge) | **Google Gemma 4 E2B Instruct**<br/>• Parameters: 2B \| Size: ~2.4 GB<br/>• Min. RAM: 6 GB+ (Multimodal Vision) |
 | **Qwen 3 4B**<br/>• Parameters: 4B \| Size: ~2.5 GB<br/>• Min. RAM: 8 GB+ (High Performance) | **Google Gemma 4 E4B Instruct**<br/>• Parameters: 4B \| Size: ~3.4 GB<br/>• Min. RAM: 8 GB+ (High-Res Multimodal) |
 | **Qwen 2.5 0.5B Instruct**<br/>• Parameters: 0.5B \| Size: ~0.5 GB<br/>• Min. RAM: 4 GB+ (Ultra-Fast) | |

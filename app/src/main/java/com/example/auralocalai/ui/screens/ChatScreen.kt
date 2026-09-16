@@ -968,7 +968,7 @@ fun ChatBubble(message: ChatMessage) {
                         val statusSuffix = if (tel.wasCancelled) " · stopped" else ""
 
                         Text(
-                            text = "⚡ TTFT: $ttftText (${tel.promptTokens} prompt tok) · $speedText tok/s (${tel.decodeTokens} tok$statusSuffix)",
+                            text = "⚡ TTFT: $ttftText (~${tel.promptTokens} prompt tok) · $speedText tok/s (${tel.decodeTokens} tok$statusSuffix)",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Medium,
                             color = if (tel.wasCancelled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary

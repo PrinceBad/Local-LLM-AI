@@ -114,6 +114,7 @@ class TelemetryBenchmarkTest {
         val coder = presets.first { it.id == "qwen2.5-coder-3b" }
         assertEquals("INT4", coder.quantization)
         assertEquals("3.0B", coder.parameterCount)
+        assertEquals("8 GB+ RAM", coder.ramRequirement)
 
         // 5. Gemma 4 E2B
         val gemmaE2b = presets.first { it.id == "gemma4-e2b" }
@@ -172,5 +173,53 @@ class TelemetryBenchmarkTest {
 
         assertEquals(1100L, updatedWarm)
         assertTrue("Cold load must be substantially larger than warm load", coldLoadMs > updatedWarm)
+    }
+
+    @Test
+    fun testContextLengthScalingInRamGuard() {
+        val model4k = ModelPreset(
+            id = "model-4k",
+            name = "4k Context Model",
+            description = "",
+            sizeLabel = "2.0 GB",
+            ramRequirement = "6 GB+ RAM",
+            downloadUrl = "",
+            fileName = "test.litertlm",
+            contextLength = "4,096 tokens"
+        )
+        val model8k = ModelPreset(
+            id = "model-8k",
+            name = "8k Context Model",
+            description = "",
+            sizeLabel = "2.0 GB",
+            ramRequirement = "6 GB+ RAM",
+            downloadUrl = "",
+            fileName = "test.litertlm",
+            contextLength = "8,192 tokens"
+        )
+
+        val ram4k = com.example.auralocalai.data.ModelSafetyValidator.getMinRequiredAvailableRamBytes(model4k, isGpu = false, contextTurns = 6)
+        val ram8k = com.example.auralocalai.data.ModelSafetyValidator.getMinRequiredAvailableRamBytes(model8k, isGpu = false, contextTurns = 6)
+
+        // 8k context window must allocate more KV cache memory headroom than 4k context window
+        assertTrue("8k model must require more RAM than 4k model at same turns", ram8k > ram4k)
+    }
+
+    @Test
+    fun testTopLevelIsValidModelFileDefaultSizeFloor() {
+        val tempFile = java.io.File.createTempFile("test_model", ".litertlm")
+        try {
+            // Write valid TFL3 header but under 50MB (e.g. 1 KB)
+            val header = byteArrayOf('T'.code.toByte(), 'F'.code.toByte(), 'L'.code.toByte(), '3'.code.toByte())
+            tempFile.writeBytes(header + ByteArray(1020))
+            
+            // Default call to top-level shim must enforce 50MB floor
+            assertFalse("Top-level isValidModelFile must reject sub-50MB files by default", com.example.auralocalai.data.isValidModelFile(tempFile))
+            
+            // Passing explicit small minSizeBytes allows testing valid header structure
+            assertTrue("Explicit minSizeBytes override passes valid header", com.example.auralocalai.data.isValidModelFile(tempFile, minSizeBytes = 8L))
+        } finally {
+            tempFile.delete()
+        }
     }
 }

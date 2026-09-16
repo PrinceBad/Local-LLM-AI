@@ -200,7 +200,11 @@ object ModelSafetyValidator {
     ): Long {
         val modelSizeBytes = estimateModelSizeBytes(modelFile, preset)
         val clampedTurns = contextTurns.coerceIn(4, 16)
-        val kvCacheOverhead = clampedTurns * (75L * 1024L * 1024L)
+        val contextTokens = preset?.let {
+            Regex("(\\d+(?:,\\d+)?)").find(it.contextLength)?.value?.replace(",", "")?.toIntOrNull()
+        } ?: 4096
+        val contextScaleFactor = (contextTokens.toDouble() / 4096.0).coerceIn(1.0, 4.0)
+        val kvCacheOverhead = (clampedTurns * (75L * 1024L * 1024L) * contextScaleFactor).toLong()
         val scratchActivationOverhead = 350L * 1024L * 1024L
         val kvAndActivationOverhead = maxOf(MIN_SCRATCH_BUFFER_BYTES, kvCacheOverhead + scratchActivationOverhead)
         val gpuOverhead = if (isGpu) GPU_BUFFER_OVERHEAD_BYTES else 0L

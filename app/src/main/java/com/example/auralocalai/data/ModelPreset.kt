@@ -77,7 +77,7 @@ data class ModelPreset(
                 name = "Qwen 2.5 Coder 3B Instruct",
                 description = "Alibaba's fast and highly capable coding-specialized LLM with 3 billion parameters (Coding Expert).",
                 sizeLabel = "2.9 GB",
-                ramRequirement = "6 GB+ RAM",
+                ramRequirement = "8 GB+ RAM",
                 downloadUrl = "https://huggingface.co/4ntoine/Qwen2.5-Coder-3B-Instruct-LiteRTLM/resolve/main/model.litertlm",
                 fileName = "qwen2.5-coder-3b.litertlm",
                 requiresHfToken = false,
@@ -121,4 +121,4 @@ data class ModelPreset(
     }
 }
 
-fun isValidModelFile(file: File): Boolean = ModelSafetyValidator.isValidModelFile(file, minSizeBytes = 8L)
+fun isValidModelFile(file: File, minSizeBytes: Long = ModelSafetyValidator.DEFAULT_MIN_MODEL_SIZE_BYTES): Boolean = ModelSafetyValidator.isValidModelFile(file, minSizeBytes = minSizeBytes)

@@ -184,14 +184,18 @@ class ModelDownloader {
                 if (isResuming && responseCode == 400) {
                     destinationFile.delete()
                 }
-                val errorMsg = if (responseCode == 403 && hfToken.isNotBlank()) {
-                    "HTTP 403 Forbidden. The model may be gated or the token lacks access.\n" +
-                    "Visit the model page on HuggingFace to accept the license."
-                } else if (responseCode == 403) {
-                    "HTTP 403 Forbidden. This model may require a HuggingFace token.\n" +
-                    "Set your token in Settings > HuggingFace Token."
-                } else {
-                    "HTTP $responseCode"
+                val errorMsg = when {
+                    responseCode == 404 ->
+                        "HTTP 404 Not Found. The model repository or download URL is no longer available upstream."
+                    responseCode == 403 && hfToken.isNotBlank() ->
+                        "HTTP 403 Forbidden. The model may be gated or the token lacks access.\n" +
+                        "Visit the model page on HuggingFace to accept the license."
+                    responseCode == 403 ->
+                        "HTTP 403 Forbidden. This model may require a HuggingFace token.\n" +
+                        "Set your token in Settings > HuggingFace Token."
+                    responseCode == 401 ->
+                        "HTTP 401 Unauthorized. Invalid or expired HuggingFace token."
+                    else -> "HTTP $responseCode"
                 }
                 emit(DownloadState.Error("Failed to download: $errorMsg"))
                 return@flow
