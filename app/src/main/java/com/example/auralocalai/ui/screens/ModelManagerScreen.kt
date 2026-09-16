@@ -154,6 +154,8 @@ fun ModelManagerScreen(
                 val isActive = uiState.activeModelId == preset.id
                 val isDownloading = uiState.currentDownloadingModelId == preset.id
 
+                val benchmark = uiState.modelLoadBenchmarks[preset.id]
+
                 PresetModelCard(
                     preset = preset,
                     isDownloaded = isDownloaded,
@@ -162,6 +164,7 @@ fun ModelManagerScreen(
                     downloadState = uiState.downloadState,
                     modelState = uiState.modelState,
                     loadingStage = uiState.loadingStage,
+                    benchmark = benchmark,
                     onDownload = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
                     onCancel = { viewModel.cancelDownload() },
@@ -371,6 +374,7 @@ fun PresetModelCard(
     downloadState: DownloadState,
     modelState: ModelState,
     loadingStage: String? = null,
+    benchmark: com.example.auralocalai.ui.ModelLoadBenchmark? = null,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
     onCancel: () -> Unit,
@@ -435,6 +439,36 @@ fun PresetModelCard(
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
+
+                        // Parameter count Pill tag
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.tertiaryContainer)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = preset.parameterCount,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+
+                        // Quantization scheme Pill tag
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = preset.quantization,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
 
@@ -473,6 +507,34 @@ fun PresetModelCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 lineHeight = 18.sp
             )
+            benchmark?.let { b ->
+                if (b.coldLoadMs != null || b.warmLoadMs != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val warmStr = b.warmLoadMs?.let { String.format(java.util.Locale.US, "%.1fs", it / 1000.0) }
+                    val coldStr = b.coldLoadMs?.let { String.format(java.util.Locale.US, "%.1fs", it / 1000.0) }
+                    val timingLabel = when {
+                        warmStr != null && coldStr != null -> "⚡ Load: ~$warmStr (warm) · Cold: ~$coldStr (device est.)"
+                        coldStr != null -> "⚡ Initial Cold Load: ~$coldStr (device est.)"
+                        warmStr != null -> "⚡ Load: ~$warmStr (device est.)"
+                        else -> ""
+                    }
+                    if (timingLabel.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = timingLabel,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(16.dp))
 
             // Action / Download panel

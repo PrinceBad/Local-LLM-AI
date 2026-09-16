@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.data
+package com.example.auralocalai.data
 
 import java.io.File
 import java.util.zip.ZipFile
@@ -20,7 +20,10 @@ data class ModelPreset(
     val fileName: String,
     val requiresHfToken: Boolean = false,
     val expectedExtension: String = ".litertlm",
-    val backendRestriction: LlmBackendRestriction = LlmBackendRestriction.ANY
+    val backendRestriction: LlmBackendRestriction = LlmBackendRestriction.ANY,
+    val quantization: String = "INT4",
+    val parameterCount: String = "Unknown",
+    val contextLength: String = "4,096 tokens"
 ) {
     companion object {
         val presets = listOf(
@@ -34,7 +37,10 @@ data class ModelPreset(
                 fileName = "deepseek-r1.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
-                backendRestriction = LlmBackendRestriction.ANY
+                backendRestriction = LlmBackendRestriction.ANY,
+                quantization = "Q8 (8-bit)",
+                parameterCount = "1.5B",
+                contextLength = "4,096 tokens"
             ),
             ModelPreset(
                 id = "qwen-1.5b",
@@ -46,7 +52,10 @@ data class ModelPreset(
                 fileName = "qwen-1.5b.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
-                backendRestriction = LlmBackendRestriction.ANY
+                backendRestriction = LlmBackendRestriction.ANY,
+                quantization = "Q8 (8-bit)",
+                parameterCount = "1.5B",
+                contextLength = "4,096 tokens"
             ),
             ModelPreset(
                 id = "qwen3-4b",
@@ -58,7 +67,10 @@ data class ModelPreset(
                 fileName = "qwen3-4b.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
-                backendRestriction = LlmBackendRestriction.ANY
+                backendRestriction = LlmBackendRestriction.ANY,
+                quantization = "mixed INT4",
+                parameterCount = "4.0B",
+                contextLength = "4,096 tokens"
             ),
             ModelPreset(
                 id = "qwen2.5-coder-3b",
@@ -70,7 +82,10 @@ data class ModelPreset(
                 fileName = "qwen2.5-coder-3b.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
-                backendRestriction = LlmBackendRestriction.ANY
+                backendRestriction = LlmBackendRestriction.ANY,
+                quantization = "INT4",
+                parameterCount = "3.0B",
+                contextLength = "4,096 tokens"
             ),
             ModelPreset(
                 id = "gemma4-e2b",
@@ -82,7 +97,10 @@ data class ModelPreset(
                 fileName = "gemma4-e2b.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
-                backendRestriction = LlmBackendRestriction.ANY
+                backendRestriction = LlmBackendRestriction.ANY,
+                quantization = "mixed 2/4/8-bit",
+                parameterCount = "2.4B",
+                contextLength = "8,192 tokens"
             ),
             ModelPreset(
                 id = "gemma4-e4b",
@@ -94,7 +112,10 @@ data class ModelPreset(
                 fileName = "gemma4-e4b.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
-                backendRestriction = LlmBackendRestriction.ANY
+                backendRestriction = LlmBackendRestriction.ANY,
+                quantization = "mixed 2/4/8-bit",
+                parameterCount = "4.0B",
+                contextLength = "8,192 tokens"
             )
         )
     }

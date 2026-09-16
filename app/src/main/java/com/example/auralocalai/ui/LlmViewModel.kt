@@ -35,6 +35,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -44,6 +45,22 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+@Serializable
+data class InferenceTelemetry(
+    val ttftMs: Long,
+    val promptTokens: Int,
+    val decodeSpeedTokPerSec: Double,
+    val decodeTokens: Int,
+    val wasCancelled: Boolean = false
+)
+
+@Serializable
+data class ModelLoadBenchmark(
+    val coldLoadMs: Long? = null,
+    val warmLoadMs: Long? = null,
+    val sampleCount: Int = 0
+)
 
 @Serializable
 data class ChatMessage(
@@ -56,7 +73,8 @@ data class ChatMessage(
     val fileUri: String? = null,
     val fileName: String? = null,
     val fileType: String? = null,
-    val id: String = java.util.UUID.randomUUID().toString()
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val telemetry: InferenceTelemetry? = null
 )
 
 const val DEFAULT_SYSTEM_PROMPT = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise."
@@ -94,7 +112,8 @@ data class UiState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val preferredBackend: String = "AUTO",
     val socInfo: SocInfo? = null,
-    val importProgress: Float? = null
+    val importProgress: Float? = null,
+    val modelLoadBenchmarks: Map<String, ModelLoadBenchmark> = emptyMap()
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
@@ -108,6 +127,70 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun loadBenchmarksFromPrefs(): Map<String, ModelLoadBenchmark> {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        val result = mutableMapOf<String, ModelLoadBenchmark>()
+        for (preset in ModelPreset.presets) {
+            val cold = prefs.getLong("model_load_cold_ms_${preset.id}", -1L).takeIf { it > 0 }
+            val warm = prefs.getLong("model_load_warm_ms_${preset.id}", -1L).takeIf { it > 0 }
+            val count = prefs.getInt("model_load_samples_${preset.id}", 0)
+            if (cold != null || warm != null) {
+                result[preset.id] = ModelLoadBenchmark(coldLoadMs = cold, warmLoadMs = warm, sampleCount = count)
+            }
+        }
+        return result
+    }
+
+    private fun recordModelLoadBenchmark(modelId: String, elapsedMs: Long) {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        val existingCold = prefs.getLong("model_load_cold_ms_${modelId}", -1L)
+        val existingWarm = prefs.getLong("model_load_warm_ms_${modelId}", -1L)
+        val existingCount = prefs.getInt("model_load_samples_${modelId}", 0)
+
+        val editor = prefs.edit()
+        val newCold: Long?
+        val newWarm: Long?
+        val newCount: Int
+
+        if (existingCold <= 0L) {
+            newCold = elapsedMs
+            newWarm = existingWarm.takeIf { it > 0 }
+            newCount = 1
+            editor.putLong("model_load_cold_ms_${modelId}", elapsedMs)
+            editor.putInt("model_load_samples_${modelId}", 1)
+        } else {
+            newCold = existingCold
+            newWarm = if (existingWarm <= 0L) {
+                elapsedMs
+            } else {
+                (existingWarm * 2 + elapsedMs) / 3
+            }
+            newCount = existingCount + 1
+            editor.putLong("model_load_warm_ms_${modelId}", newWarm)
+            editor.putInt("model_load_samples_${modelId}", newCount)
+        }
+        editor.apply()
+
+        _uiState.update { state ->
+            val updated = state.modelLoadBenchmarks.toMutableMap()
+            updated[modelId] = ModelLoadBenchmark(
+                coldLoadMs = newCold,
+                warmLoadMs = newWarm,
+                sampleCount = newCount
+            )
+            state.copy(modelLoadBenchmarks = updated)
+        }
+    }
+
+    fun estimatePromptTokens(prompt: String, hasImage: Boolean = false): Int {
+        val textTokens = (prompt.length / 3.8).toInt().coerceAtLeast(1)
+        val imageTokens = if (hasImage) 256 else 0
+        return textTokens + imageTokens
+    }
+
+
     private val _uiState = MutableStateFlow(UiState())
 
     init {
@@ -116,7 +199,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val history = chatRepository.loadMessages()
             val token = tokenStorage.getToken()
             val degraded = !tokenStorage.isHardwareEncrypted
-            _uiState.update { it.copy(messages = history, hfToken = token, isKeystoreDegraded = degraded) }
+            val benchmarks = loadBenchmarksFromPrefs()
+            _uiState.update { it.copy(messages = history, hfToken = token, isKeystoreDegraded = degraded, modelLoadBenchmarks = benchmarks) }
 
             // Sweep incomplete or corrupted artifacts asynchronously on Dispatchers.IO (prevents cold-start ANRs)
             ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(storageDir)
@@ -266,6 +350,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     val modelId = matchingPreset?.id ?: firstDownloaded
                     
                     _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model file\u2026") }
+                    val startNs = System.nanoTime()
                     val result = inferenceEngine.loadModel(
                         modelPath = File(storageDir, firstDownloaded).absolutePath,
                         preferredBackend = initialPreferredBackend,
@@ -274,7 +359,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                             _uiState.update { it.copy(loadingStage = stage) }
                         }
                     )
+                    val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
                     if (result.isSuccess) {
+                        recordModelLoadBenchmark(modelId, elapsedMs)
                         _uiState.update { 
                             it.copy(
                                 modelState = ModelState.Loaded(modelName),
@@ -500,6 +587,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val matchingPreset = ModelPreset.presets.firstOrNull { it.id == modelId }
             val displayName = matchingPreset?.name ?: fileName
 
+            val startNs = System.nanoTime()
             val result = inferenceEngine.loadModel(
                 modelPath = File(storageDir, fileName).absolutePath,
                 preferredBackend = _uiState.value.preferredBackend,
@@ -508,7 +596,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update { it.copy(loadingStage = stage) }
                 }
             )
+            val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
             if (result.isSuccess) {
+                recordModelLoadBenchmark(modelId, elapsedMs)
                 _uiState.update { 
                     it.copy(
                         modelState = ModelState.Loaded(displayName),
@@ -837,41 +927,86 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 null
             }
 
+            val promptTokens = estimatePromptTokens(fullPrompt, hasImage = (imageBitmap != null))
+            val t0 = System.nanoTime()
+            var tFirst: Long? = null
+            var tokenCount = 0
+            var wasCancelled = false
+            var accumulatedText = ""
+            var lastUpdateTime = System.currentTimeMillis()
+
             try {
                 val aiMessagePlaceholder = ChatMessage("", isUser = false)
                 _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
-                var accumulatedText = ""
-                var lastUpdateTime = System.currentTimeMillis()
-                inferenceEngine.generateResponse(fullPrompt, imageBitmap).collect { partialToken ->
-                    accumulatedText += partialToken
-                    val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastUpdateTime > 100) {
-                        _uiState.update { state ->
-                            val updatedMessages = state.messages.toMutableList()
-                            if (updatedMessages.isNotEmpty()) {
-                                val oldMessage = updatedMessages.last()
-                                updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
-                            }
-                            state.copy(messages = updatedMessages)
+                inferenceEngine.generateResponse(fullPrompt, imageBitmap)
+                    .onCompletion { cause ->
+                        if (cause is kotlinx.coroutines.CancellationException) {
+                            wasCancelled = true
                         }
-                        lastUpdateTime = currentTime
                     }
+                    .collect { partialToken ->
+                        if (tFirst == null) {
+                            tFirst = System.nanoTime()
+                        }
+                        tokenCount++
+                        accumulatedText += partialToken
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastUpdateTime > 100) {
+                            _uiState.update { state ->
+                                val updatedMessages = state.messages.toMutableList()
+                                if (updatedMessages.isNotEmpty()) {
+                                    val oldMessage = updatedMessages.last()
+                                    updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                                }
+                                state.copy(messages = updatedMessages)
+                            }
+                            lastUpdateTime = currentTime
+                        }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                wasCancelled = true
+                throw e
+            } catch (e: Exception) {
+                if (accumulatedText.isEmpty()) {
+                    accumulatedText = friendlyErrorMessage(e.message)
                 }
+            } finally {
+                val tEnd = System.nanoTime()
+                val firstTime = tFirst
+                val telemetry = if (firstTime != null && tokenCount > 0) {
+                    val ttftMs = (firstTime - t0) / 1_000_000
+                    val decodeDurationSec = (tEnd - firstTime) / 1_000_000_000.0
+                    val decodeTokPerSec = if (tokenCount > 1 && decodeDurationSec > 0.001) {
+                        (tokenCount - 1) / decodeDurationSec
+                    } else if (decodeDurationSec > 0.001) {
+                        1.0 / decodeDurationSec
+                    } else {
+                        0.0
+                    }
+                    InferenceTelemetry(
+                        ttftMs = ttftMs,
+                        promptTokens = promptTokens,
+                        decodeSpeedTokPerSec = decodeTokPerSec,
+                        decodeTokens = tokenCount,
+                        wasCancelled = wasCancelled
+                    )
+                } else null
+
                 _uiState.update { state ->
                     val updatedMessages = state.messages.toMutableList()
                     if (updatedMessages.isNotEmpty()) {
                         val oldMessage = updatedMessages.last()
-                        updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                        updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(
+                            content = accumulatedText,
+                            telemetry = telemetry
+                        )
                     }
-                    state.copy(messages = updatedMessages)
+                    state.copy(messages = updatedMessages, isGenerating = false)
                 }
-            } finally {
                 imageBitmap?.recycle()
+                saveMessages(_uiState.value.messages)
             }
-            
-            _uiState.update { it.copy(isGenerating = false) }
-            saveMessages(_uiState.value.messages)
         }
     }
 

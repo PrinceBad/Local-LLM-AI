@@ -939,6 +939,42 @@ fun ChatBubble(message: ChatMessage) {
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
                 }
+
+                // Telemetry pill (if available on assistant message)
+                if (!message.isUser && message.telemetry != null) {
+                    val tel = message.telemetry
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isSystemInDarkTheme()) Color(0xFF1E293B)
+                                else Color(0xFFF1F5F9)
+                            )
+                            .border(
+                                1.dp,
+                                if (isSystemInDarkTheme()) Color(0xFF334155)
+                                else Color(0xFFE2E8F0),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        val ttftText = if (tel.ttftMs < 1000) {
+                            "${tel.ttftMs}ms"
+                        } else {
+                            String.format(java.util.Locale.US, "%.1fs", tel.ttftMs / 1000.0)
+                        }
+                        val speedText = String.format(java.util.Locale.US, "%.1f", tel.decodeSpeedTokPerSec)
+                        val statusSuffix = if (tel.wasCancelled) " · stopped" else ""
+
+                        Text(
+                            text = "⚡ TTFT: $ttftText (${tel.promptTokens} prompt tok) · $speedText tok/s (${tel.decodeTokens} tok$statusSuffix)",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (tel.wasCancelled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
                 
                 if (message.ocrText != null) {
                     Spacer(modifier = Modifier.height(8.dp))
