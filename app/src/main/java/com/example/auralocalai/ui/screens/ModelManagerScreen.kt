@@ -153,6 +153,8 @@ fun ModelManagerScreen(
                 val isDownloaded = uiState.localModels.contains(preset.fileName)
                 val isActive = uiState.activeModelId == preset.id
                 val isDownloading = uiState.currentDownloadingModelId == preset.id
+                val isLoadingThisModel = uiState.loadingModelId == preset.id
+                val isOtherLoading = uiState.loadingModelId != null && !isLoadingThisModel
 
                 val benchmark = uiState.modelLoadBenchmarks[preset.id]
 
@@ -161,12 +163,15 @@ fun ModelManagerScreen(
                     isDownloaded = isDownloaded,
                     isActive = isActive,
                     isDownloading = isDownloading,
+                    isLoading = isLoadingThisModel,
+                    isOtherLoading = isOtherLoading,
                     downloadState = uiState.downloadState,
                     modelState = uiState.modelState,
-                    loadingStage = uiState.loadingStage,
+                    loadingStage = if (isLoadingThisModel) uiState.loadingStage else null,
                     benchmark = benchmark,
                     onDownload = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
+                    onCancelLoad = { viewModel.cancelLoading() },
                     onCancel = { viewModel.cancelDownload() },
                     onDelete = { modelToDelete = preset }
                 )
@@ -365,24 +370,27 @@ fun ModelManagerScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PresetModelCard(
     preset: ModelPreset,
     isDownloaded: Boolean,
     isActive: Boolean,
     isDownloading: Boolean,
+    isLoading: Boolean,
+    isOtherLoading: Boolean,
     downloadState: DownloadState,
     modelState: ModelState,
     loadingStage: String? = null,
     benchmark: com.example.auralocalai.ui.ModelLoadBenchmark? = null,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
+    onCancelLoad: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(
             width = if (isActive) 1.5.dp else 1.dp,
@@ -406,9 +414,10 @@ fun PresetModelCard(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         // Size Pill tag
                         Box(
@@ -535,11 +544,59 @@ fun PresetModelCard(
                     }
                 }
             }
+
+            // Dedicated loading stage banner if currently initializing
+            if (isLoading && loadingStage != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f))
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = loadingStage,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 2
+                            )
+                        }
+                        Text(
+                            text = "Cancel",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clickable { onCancelLoad() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // Action / Download panel
             if (isDownloading) {
-                DownloadProgressPanel(state = downloadState, onCancel = onCancel)
+                DownloadProgressPanel(state = downloadState, onCancel = onCancel, onRetry = onDownload)
             } else {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -560,13 +617,12 @@ fun PresetModelCard(
                                 )
                             }
                         } else {
-                            val isLoading = modelState is ModelState.Loading
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 OutlinedButton(
                                     onClick = onDelete,
-                                    enabled = !isLoading,
+                                    enabled = !isLoading && !isOtherLoading,
                                     shape = RoundedCornerShape(18.dp),
                                     modifier = Modifier.height(36.dp),
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
@@ -584,17 +640,35 @@ fun PresetModelCard(
 
                                 Button(
                                     onClick = onLoad,
-                                    enabled = !isLoading,
+                                    enabled = !isLoading && !isOtherLoading,
                                     shape = RoundedCornerShape(18.dp),
                                     modifier = Modifier.height(36.dp),
                                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
-                                    Text(
-                                        text = if (isLoading) (loadingStage ?: "Loading…") else "Load Model",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    if (isLoading) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(12.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.onPrimary
+                                            )
+                                            Text(
+                                                text = "Loading…",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "Load Model",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -622,7 +696,8 @@ fun PresetModelCard(
 @Composable
 fun DownloadProgressPanel(
     state: DownloadState,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onRetry: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -706,21 +781,42 @@ fun DownloadProgressPanel(
             is DownloadState.Error -> {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Error: ${state.message}",
-                        fontSize = 12.sp,
+                        text = "Download Failed",
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Retry",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clickable { onCancel() }
-                            .padding(vertical = 4.dp)
+                        text = state.message,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.error,
+                        lineHeight = 15.sp
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = { onRetry?.invoke() ?: onCancel() },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("Retry Download", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = onCancel,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                        ) {
+                            Text("Dismiss", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }

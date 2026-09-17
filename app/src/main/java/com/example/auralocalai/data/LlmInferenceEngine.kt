@@ -177,7 +177,7 @@ class LlmInferenceEngine(private val context: Context) {
                         }
                         gpuError = ramError
                     } else {
-                        val gpuStage = if (npuError != null) "NPU unavailable — initializing GPU backend…" else "Initializing GPU backend…"
+                        val gpuStage = if (npuError != null) "NPU unavailable — compiling GPU shaders…" else "Compiling GPU shaders…"
                         onStageUpdate?.invoke(gpuStage)
                         try {
                             val config = EngineConfig(
@@ -186,7 +186,17 @@ class LlmInferenceEngine(private val context: Context) {
                                 cacheDir = context.cacheDir.absolutePath
                             )
                             val newEngine = Engine(config)
-                            newEngine.initialize()
+                            if (preferredBackend == "AUTO") {
+                                val initOk = kotlinx.coroutines.withTimeoutOrNull(40_000L) {
+                                    newEngine.initialize()
+                                    true
+                                }
+                                if (initOk == null) {
+                                    throw RuntimeException("GPU shader compilation timed out after 40s")
+                                }
+                            } else {
+                                newEngine.initialize()
+                            }
                             engine = newEngine
                             conversation = newEngine.createConversation()
                             currentModelPath = modelPath
@@ -194,6 +204,7 @@ class LlmInferenceEngine(private val context: Context) {
                             loaded = true
                         } catch (e: Throwable) {
                             gpuError = e
+                            android.util.Log.w("LlmInferenceEngine", "GPU initialization failed or timed out: ${e.message}")
                             // If CPU fallback is NOT allowed or GPU_ONLY is preferred, fail immediately
                             if (restriction != LlmBackendRestriction.ANY || preferredBackend == "GPU_ONLY") {
                                 val msg = buildString {
@@ -203,7 +214,7 @@ class LlmInferenceEngine(private val context: Context) {
                                 }
                                 return@withContext Result.failure(Exception(msg, e))
                             }
-                    }
+                        }
                 }
             }
             }

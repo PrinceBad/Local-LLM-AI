@@ -74,7 +74,8 @@ data class ChatMessage(
     val fileName: String? = null,
     val fileType: String? = null,
     val id: String = java.util.UUID.randomUUID().toString(),
-    val telemetry: InferenceTelemetry? = null
+    val telemetry: InferenceTelemetry? = null,
+    val modelId: String? = null
 )
 
 const val DEFAULT_SYSTEM_PROMPT = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise."
@@ -92,6 +93,7 @@ data class UiState(
     val modelState: ModelState = ModelState.Unloaded,
     val downloadState: DownloadState = DownloadState.Idle,
     val currentDownloadingModelId: String? = null,
+    val loadingModelId: String? = null,
     val activeModelId: String? = null,
     val activeBackend: String = "None",
     val lastNpuError: String? = null,
@@ -217,6 +219,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var downloadJob: Job? = null
+    private var loadModelJob: Job? = null
     private var inferenceJob: Job? = null
 
     private fun migrateExistingModels() {
@@ -314,7 +317,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     is ServiceDownloadState.Error -> {
                         _uiState.update {
                             it.copy(
-                                currentDownloadingModelId = null,
+                                currentDownloadingModelId = state.modelId,
                                 downloadState = DownloadState.Error(state.message)
                             )
                         }
@@ -349,7 +352,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     val modelName = matchingPreset?.name ?: firstDownloaded
                     val modelId = matchingPreset?.id ?: firstDownloaded
                     
-                    _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model file\u2026") }
+                    _uiState.update { it.copy(modelState = ModelState.Loading, loadingModelId = modelId, loadingStage = "Validating model file...") }
                     val startNs = System.nanoTime()
                     val result = inferenceEngine.loadModel(
                         modelPath = File(storageDir, firstDownloaded).absolutePath,
@@ -366,6 +369,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                             it.copy(
                                 modelState = ModelState.Loaded(modelName),
                                 activeModelId = modelId,
+                                loadingModelId = null,
                                 activeBackend = inferenceEngine.activeBackend,
                                 lastNpuError = inferenceEngine.lastNpuError?.let { err ->
                                     val sw = java.io.StringWriter()
@@ -376,7 +380,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                     } else {
-                        _uiState.update { it.copy(modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)), activeBackend = "None", lastNpuError = inferenceEngine.lastNpuError?.let { err ->
+                        _uiState.update { it.copy(modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)), activeBackend = "None", loadingModelId = null, lastNpuError = inferenceEngine.lastNpuError?.let { err ->
                                     val sw = java.io.StringWriter()
                                     err.printStackTrace(java.io.PrintWriter(sw))
                                     sw.toString()
@@ -407,20 +411,76 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val context = getApplication<Application>().applicationContext
-        // Read HF token from SharedPreferences (set by user in Settings)
-        val prefs = context.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE)
-        val hfToken = prefs.getString("hf_token", "") ?: ""
+        val hfToken = tokenStorage.getToken()
 
-        val intent = Intent(context, ModelDownloadService::class.java).apply {
-            putExtra("url", url)
-            putExtra("fileName", fileName)
-            putExtra("modelId", modelId)
-            putExtra("hfToken", hfToken)
+        var serviceStarted = false
+        try {
+            val intent = Intent(context, ModelDownloadService::class.java).apply {
+                putExtra("url", url)
+                putExtra("fileName", fileName)
+                putExtra("modelId", modelId)
+                putExtra("hfToken", hfToken)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            serviceStarted = true
+        } catch (e: Exception) {
+            Log.w("LlmViewModel", "Could not start ModelDownloadService (e.g. background execution limits): ${e.message}. Using in-app fallback download.")
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+
+        if (!serviceStarted) {
+            downloadJob = viewModelScope.launch(Dispatchers.IO) {
+                val tempFile = File(storageDir, "$fileName.tmp")
+                val destFile = File(storageDir, fileName)
+
+                downloader.downloadModel(url, tempFile, hfToken).collect { state ->
+                    when (state) {
+                        is DownloadState.Idle -> {
+                            _uiState.update { it.copy(downloadState = DownloadState.Idle) }
+                        }
+                        is DownloadState.Progress -> {
+                            _uiState.update {
+                                it.copy(
+                                    currentDownloadingModelId = modelId,
+                                    downloadState = state
+                                )
+                            }
+                        }
+                        is DownloadState.Success -> {
+                            val renameSuccess = ModelSafetyValidator.moveFileSafely(tempFile, destFile)
+                            if (renameSuccess) {
+                                _uiState.update {
+                                    it.copy(
+                                        currentDownloadingModelId = null,
+                                        downloadState = DownloadState.Idle
+                                    )
+                                }
+                                refreshDownloadedModels()
+                                loadModel(fileName, modelId)
+                            } else {
+                                if (tempFile.exists()) tempFile.delete()
+                                _uiState.update {
+                                    it.copy(
+                                        currentDownloadingModelId = modelId,
+                                        downloadState = DownloadState.Error("Failed to finalize downloaded model file.")
+                                    )
+                                }
+                            }
+                        }
+                        is DownloadState.Error -> {
+                            _uiState.update {
+                                it.copy(
+                                    currentDownloadingModelId = modelId,
+                                    downloadState = state
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -454,17 +514,17 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveHfToken(token: String) {
-        val context = getApplication<Application>().applicationContext
-        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit().putString("hf_token", token).apply()
-        _uiState.update { it.copy(hfToken = token) }
+        viewModelScope.launch(Dispatchers.IO) {
+            tokenStorage.saveToken(token)
+            _uiState.update { it.copy(hfToken = token) }
+        }
     }
 
     fun clearHfToken() {
-        val context = getApplication<Application>().applicationContext
-        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit().remove("hf_token").apply()
-        _uiState.update { it.copy(hfToken = "") }
+        viewModelScope.launch(Dispatchers.IO) {
+            tokenStorage.clearToken()
+            _uiState.update { it.copy(hfToken = "") }
+        }
     }
 
     fun validateHfToken(token: String, callback: (Boolean, String) -> Unit) {
@@ -523,9 +583,26 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         saveMessages(_uiState.value.messages)
     }
 
+    fun cancelLoading() {
+        loadModelJob?.cancel()
+        loadModelJob = null
+        inferenceEngine.close()
+        _uiState.update { 
+            it.copy(
+                modelState = ModelState.Unloaded,
+                loadingModelId = null,
+                loadingStage = null
+            )
+        }
+    }
+
     fun cancelDownload() {
-        val context = getApplication<Application>().applicationContext
-        context.stopService(Intent(context, ModelDownloadService::class.java))
+        downloadJob?.cancel()
+        downloadJob = null
+        try {
+            val context = getApplication<Application>().applicationContext
+            context.stopService(Intent(context, ModelDownloadService::class.java))
+        } catch (_: Exception) {}
         _uiState.update { 
             it.copy(
                 downloadState = DownloadState.Idle,
@@ -582,8 +659,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadModel(fileName: String, modelId: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(modelState = ModelState.Loading, loadingStage = "Validating model file\u2026") }
+        loadModelJob?.cancel()
+        loadModelJob = viewModelScope.launch {
+            _uiState.update { it.copy(modelState = ModelState.Loading, loadingModelId = modelId, loadingStage = "Validating model file...") }
             val matchingPreset = ModelPreset.presets.firstOrNull { it.id == modelId }
             val displayName = matchingPreset?.name ?: fileName
 
@@ -603,6 +681,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         modelState = ModelState.Loaded(displayName),
                         activeModelId = modelId,
+                        loadingModelId = null,
                         activeBackend = inferenceEngine.activeBackend,
                         lastNpuError = inferenceEngine.lastNpuError?.let { err ->
                             val sw = java.io.StringWriter()
@@ -617,6 +696,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)),
                         activeBackend = "None",
+                        loadingModelId = null,
                         lastNpuError = inferenceEngine.lastNpuError?.let { err ->
                             val sw = java.io.StringWriter()
                             err.printStackTrace(java.io.PrintWriter(sw))
@@ -913,16 +993,10 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             }
             val fullPrompt = "$systemHeader$history\nAI: "
 
-            // Extract bitmap natively if a vision-capable model is loaded and image is attached
+            // Extract downsampled bitmap natively if a vision-capable model is loaded and image is attached
             val imageBitmap: Bitmap? = if (imageUri != null && (activeModel == "gemma4-e2b" || activeModel == "gemma4-e4b")) {
-                try {
-                    val context = getApplication<Application>().applicationContext
-                    context.contentResolver.openInputStream(Uri.parse(imageUri))?.use { stream ->
-                        android.graphics.BitmapFactory.decodeStream(stream)
-                    }
-                } catch (e: Exception) {
-                    null
-                }
+                val context = getApplication<Application>().applicationContext
+                decodeSampledBitmap(context, Uri.parse(imageUri), maxDimension = 1024)
             } else {
                 null
             }
@@ -936,7 +1010,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             var lastUpdateTime = System.currentTimeMillis()
 
             try {
-                val aiMessagePlaceholder = ChatMessage("", isUser = false)
+                val aiMessagePlaceholder = ChatMessage("", isUser = false, modelId = activeModel)
                 _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
                 inferenceEngine.generateResponse(fullPrompt, imageBitmap)
@@ -972,6 +1046,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     accumulatedText = friendlyErrorMessage(e.message)
                 }
             } finally {
+                imageBitmap?.recycle()
                 val tEnd = System.nanoTime()
                 val firstTime = tFirst
                 val telemetry = if (firstTime != null && tokenCount > 0) {
@@ -1068,4 +1143,82 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         inferenceJob?.cancel()
         inferenceEngine.close()
     }
+
+    private fun decodeSampledBitmap(context: Context, uri: Uri, maxDimension: Int = 1024): Bitmap? {
+        return try {
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, options)
+            }
+
+            if (options.outWidth <= 0 || options.outHeight <= 0) return null
+
+            var inSampleSize = 1
+            val maxSide = maxOf(options.outWidth, options.outHeight)
+            while ((maxSide / inSampleSize) > maxDimension * 2) {
+                inSampleSize *= 2
+            }
+
+            val decodeOptions = android.graphics.BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+
+            val sampled = context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, decodeOptions)
+            } ?: return null
+
+            var orientation = android.media.ExifInterface.ORIENTATION_NORMAL
+            try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val exif = android.media.ExifInterface(stream)
+                    orientation = exif.getAttributeInt(
+                        android.media.ExifInterface.TAG_ORIENTATION,
+                        android.media.ExifInterface.ORIENTATION_NORMAL
+                    )
+                }
+            } catch (e: Exception) {
+                // Ignore EXIF read errors
+            }
+
+            val matrix = android.graphics.Matrix()
+            when (orientation) {
+                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                android.media.ExifInterface.ORIENTATION_TRANSPOSE -> {
+                    matrix.postRotate(90f)
+                    matrix.postScale(-1f, 1f)
+                }
+                android.media.ExifInterface.ORIENTATION_TRANSVERSE -> {
+                    matrix.postRotate(270f)
+                    matrix.postScale(-1f, 1f)
+                }
+            }
+
+            val currentMax = maxOf(sampled.width, sampled.height)
+            if (currentMax > maxDimension) {
+                val scale = maxDimension.toFloat() / currentMax.toFloat()
+                matrix.postScale(scale, scale)
+            }
+
+            val transformed = if (!matrix.isIdentity) {
+                val result = Bitmap.createBitmap(sampled, 0, 0, sampled.width, sampled.height, matrix, true)
+                if (result != sampled) {
+                    sampled.recycle()
+                }
+                result
+            } else {
+                sampled
+            }
+            transformed
+        } catch (e: Exception) {
+            null
+        }
+    }
+
 }
