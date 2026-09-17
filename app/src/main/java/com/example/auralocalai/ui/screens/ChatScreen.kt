@@ -363,17 +363,12 @@ fun ChatScreen(
                                     ModelPreset.isKnownNonReasoningModel(message.modelId) -> false
                                     // 2. Catalog reasoning models (DeepSeek-R1, QwQ): always treat as reasoning
                                     ModelPreset.isReasoningModel(message.modelId) -> true
-                                    // 3. Custom imported models: during active streaming, evaluate against live accumulated tokens
-                                    else -> {
-                                        val trimmed = message.content.trimStart()
-                                        trimmed.startsWith("<think>") || (isActivelyStreaming && trimmed.isNotEmpty() && "<think>".startsWith(trimmed))
-                                    }
+                                    // 3. Custom imported models: gate strictly on confirmed full tag prefix
+                                    else -> message.content.trimStart().startsWith("<think>")
                                 }
                             } else {
-                                // 4. Legacy history: decouple from active model so switching presets doesn't alter past chat;
-                                // gate strictly on whether the original response started with <think>
-                                val trimmed = message.content.trimStart()
-                                trimmed.startsWith("<think>") || (isActivelyStreaming && trimmed.isNotEmpty() && "<think>".startsWith(trimmed))
+                                // 4. Legacy history: decouple from active model; gate strictly on confirmed full tag prefix
+                                message.content.trimStart().startsWith("<think>")
                             }
                         }
 
@@ -823,15 +818,6 @@ fun ChatBubble(
     isActivelyGenerating: Boolean = false,
     isReasoningModel: Boolean = false
 ) {
-    // Retain/latch reasoning status once detected during live streaming so it never flaps back
-    var isReasoningDetected by remember(message.id) { mutableStateOf(isReasoningModel) }
-    if (!isReasoningDetected && !message.isUser) {
-        val trimmed = message.content.trimStart()
-        if (trimmed.startsWith("<think>") || (isActivelyGenerating && trimmed.isNotEmpty() && "<think>".startsWith(trimmed))) {
-            isReasoningDetected = true
-        }
-    }
-    val effectiveIsReasoning = isReasoningModel || isReasoningDetected
     val bubbleColor = if (message.isUser) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -989,7 +975,7 @@ fun ChatBubble(
 
                 // Parse think blocks only for AI assistant messages from reasoning models
                 // TODO: consider incremental parsing from last known offset if this shows up in profiling
-                val parsed = if (!message.isUser && effectiveIsReasoning) {
+                val parsed = if (!message.isUser && isReasoningModel) {
                     remember(message.content) { parseThinkBlocks(message.content) }
                 } else {
                     ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content)
