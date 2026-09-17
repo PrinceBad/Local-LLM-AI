@@ -23,9 +23,23 @@ data class ModelPreset(
     val backendRestriction: LlmBackendRestriction = LlmBackendRestriction.ANY,
     val quantization: String = "INT4",
     val parameterCount: String = "Unknown",
-    val contextLength: String = "4,096 tokens"
+    val contextLength: String = "4,096 tokens",
+    val isReasoningModel: Boolean = false
 ) {
     companion object {
+        fun isReasoningModel(modelId: String?): Boolean {
+            if (modelId == null) return false
+            val preset = presets.find { it.id.equals(modelId, ignoreCase = true) }
+            if (preset != null) return preset.isReasoningModel
+            return modelId.contains("deepseek", ignoreCase = true) || modelId.contains("qwq", ignoreCase = true)
+        }
+
+        fun isKnownNonReasoningModel(modelId: String?): Boolean {
+            if (modelId == null) return false
+            val preset = presets.find { it.id.equals(modelId, ignoreCase = true) }
+            return preset != null && !preset.isReasoningModel
+        }
+
         val presets = listOf(
             ModelPreset(
                 id = "deepseek-1.5b",
@@ -40,7 +54,8 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY,
                 quantization = "Q8 (8-bit)",
                 parameterCount = "1.5B",
-                contextLength = "4,096 tokens"
+                contextLength = "4,096 tokens",
+                isReasoningModel = true
             ),
             ModelPreset(
                 id = "qwen-1.5b",
@@ -107,7 +122,7 @@ data class ModelPreset(
                 name = "Google Gemma 4 E4B Instruct (Multimodal)",
                 description = "Google's powerful on-device LLM with 4B parameters. Superior reasoning, math, and coding over E2B with native multimodal vision support (High-Res Multimodal).",
                 sizeLabel = "3.4 GB",
-                ramRequirement = "8 GB+ RAM",
+                ramRequirement = "12 GB+ RAM",
                 downloadUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
                 fileName = "gemma4-e4b.litertlm",
                 requiresHfToken = false,

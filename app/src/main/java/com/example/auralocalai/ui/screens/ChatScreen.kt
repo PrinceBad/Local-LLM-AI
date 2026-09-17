@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -45,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.example.auralocalai.ui.ChatMessage
 import com.example.auralocalai.ui.LlmViewModel
 import com.example.auralocalai.ui.ModelState
+import com.example.auralocalai.data.ModelPreset
 import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -234,58 +236,18 @@ fun ChatScreen(
                             letterSpacing = 1.0.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        var showNpuErrorDialog by remember { mutableStateOf(false) }
-                        if (showNpuErrorDialog && uiState.lastNpuError != null) {
-                            AlertDialog(
-                                onDismissRequest = { showNpuErrorDialog = false },
-                                title = { Text("NPU Error Details") },
-                                text = {
-                                    androidx.compose.foundation.text.selection.SelectionContainer {
-                                        Text(
-                                            text = uiState.lastNpuError ?: "",
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            fontSize = 10.sp,
-                                            modifier = Modifier.verticalScroll(rememberScrollState())
-                                        )
-                                    }
-                                },
-                                confirmButton = {
-                                    TextButton(onClick = { showNpuErrorDialog = false }) {
-                                        Text("Dismiss")
-                                    }
-                                }
-                            )
-                        }
-                        
                         val subtitleText = when (val state = uiState.modelState) {
-                            is ModelState.Loaded -> {
-                                val name = state.modelName.replace("(Alibaba)", "").trim()
-                                val backendInfo = if (uiState.lastNpuError != null) "${uiState.activeBackend} (NPU Error)" else uiState.activeBackend
-                                "$name ($backendInfo)"
-                            }
-                            ModelState.Loading -> uiState.loadingStage ?: "Loading Model..."
+                            is ModelState.Loaded -> state.modelName.replace("(Alibaba)", "").trim()
+                            ModelState.Loading -> "Loading Model..."
                             is ModelState.Error -> "Engine Error"
                             ModelState.Unloaded -> "No model loaded (Offline)"
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = subtitleText,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (uiState.lastNpuError != null && uiState.modelState is ModelState.Loaded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                            if (uiState.modelState is ModelState.Loaded && uiState.lastNpuError != null) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Default.Error,
-                                    contentDescription = "View NPU Error Details",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable { showNpuErrorDialog = true }
-                                )
-                            }
-                        }
+                        Text(
+                            text = subtitleText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
                     }
 
                     Row(
@@ -391,8 +353,30 @@ fun ChatScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(items = uiState.messages, key = { it.id }) { message ->
-                        ChatBubble(message = message)
+                    items(uiState.messages) { message ->
+                        val isLastMessage = message == uiState.messages.lastOrNull()
+                        val isActivelyStreaming = isLastMessage && uiState.isGenerating && !message.isUser
+                        val isReasoning = !message.isUser && run {
+                            if (message.modelId != null) {
+                                when {
+                                    // 1. Catalog non-reasoning models (e.g. Qwen Coder, Gemma): never treat as reasoning
+                                    ModelPreset.isKnownNonReasoningModel(message.modelId) -> false
+                                    // 2. Catalog reasoning models (DeepSeek-R1, QwQ): always treat as reasoning
+                                    ModelPreset.isReasoningModel(message.modelId) -> true
+                                    // 3. Custom imported models: gate strictly on confirmed full tag prefix
+                                    else -> message.content.trimStart().startsWith("<think>")
+                                }
+                            } else {
+                                // 4. Legacy history: decouple from active model; gate strictly on confirmed full tag prefix
+                                message.content.trimStart().startsWith("<think>")
+                            }
+                        }
+
+                        ChatBubble(
+                            message = message,
+                            isActivelyGenerating = isActivelyStreaming,
+                            isReasoningModel = isReasoning
+                        )
                     }
 
                     if (uiState.isGenerating) {
@@ -773,8 +757,67 @@ fun ChatScreen(
     }
 }
 
+data class ParsedMessageContent(
+    val thinkContent: String?,
+    val hasUnclosedThink: Boolean,
+    val mainContent: String
+)
+
+// TODO: consider incremental parsing from last known offset if this shows up in profiling
+fun parseThinkBlocks(rawContent: String): ParsedMessageContent {
+    val thinkStartTag = "<think>"
+    val thinkEndTag = "</think>"
+
+    if (!rawContent.contains(thinkStartTag)) {
+        return ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = rawContent)
+    }
+
+    val thinkBlocks = mutableListOf<String>()
+    val mainBlocks = mutableListOf<String>()
+    var currIndex = 0
+    var hasUnclosed = false
+
+    while (currIndex < rawContent.length) {
+        val startIndex = rawContent.indexOf(thinkStartTag, currIndex)
+        if (startIndex == -1) {
+            val remaining = rawContent.substring(currIndex).trim()
+            if (remaining.isNotEmpty()) mainBlocks.add(remaining)
+            break
+        }
+
+        val before = rawContent.substring(currIndex, startIndex).trim()
+        if (before.isNotEmpty()) mainBlocks.add(before)
+
+        val endIndex = rawContent.indexOf(thinkEndTag, startIndex + thinkStartTag.length)
+        if (endIndex != -1) {
+            val thinkText = rawContent.substring(startIndex + thinkStartTag.length, endIndex).trim()
+            if (thinkText.isNotEmpty()) thinkBlocks.add(thinkText)
+            currIndex = endIndex + thinkEndTag.length
+        } else {
+            val unclosedThink = rawContent.substring(startIndex + thinkStartTag.length).trim()
+            if (unclosedThink.isNotEmpty()) thinkBlocks.add(unclosedThink)
+            hasUnclosed = true
+            currIndex = rawContent.length
+            break
+        }
+    }
+
+    val combinedThink = if (thinkBlocks.isNotEmpty()) thinkBlocks.joinToString("\n\n---\n\n") else null
+    val combinedMain = mainBlocks.joinToString("\n\n")
+
+    return ParsedMessageContent(
+        thinkContent = combinedThink,
+        hasUnclosedThink = hasUnclosed,
+        mainContent = combinedMain
+    )
+}
+
 @Composable
-fun ChatBubble(message: ChatMessage) {
+fun ChatBubble(
+    message: ChatMessage,
+    isActivelyGenerating: Boolean = false,
+    isReasoningModel: Boolean = false
+) {
     val bubbleColor = if (message.isUser) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -920,7 +963,7 @@ fun ChatBubble(message: ChatMessage) {
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = "${message.fileType?.uppercase() ?: "Document"} \u2022 Tap to open",
+                                    text = "${message.fileType?.uppercase() ?: "Document"} • Tap to open",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -930,50 +973,88 @@ fun ChatBubble(message: ChatMessage) {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                if (message.content.isNotEmpty()) {
+                // Parse think blocks only for AI assistant messages from reasoning models
+                // TODO: consider incremental parsing from last known offset if this shows up in profiling
+                val parsed = if (!message.isUser && isReasoningModel) {
+                    remember(message.content) { parseThinkBlocks(message.content) }
+                } else {
+                    ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content)
+                }
+
+                // Collapsible reasoning process accordion for DeepSeek-R1 CoT
+                if (!parsed.thinkContent.isNullOrBlank()) {
+                    val isThinkingLive = parsed.hasUnclosedThink && isActivelyGenerating
+                    val isThinkingStopped = parsed.hasUnclosedThink && !isActivelyGenerating
+                    var isUserExpanded by remember(message.id) { mutableStateOf<Boolean?>(null) }
+                    val isThinkExpanded = isUserExpanded ?: isThinkingLive
+
+                    val headerText = when {
+                        isThinkingLive -> "Thinking in progress…"
+                        isThinkingStopped -> "Thinking (stopped)"
+                        else -> "Thinking Process"
+                    }
+
+                    val headerColor = when {
+                        isThinkingStopped -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSystemInDarkTheme()) Color(0xFF1E293B).copy(alpha = 0.6f) else Color(0xFFF1F5F9)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSystemInDarkTheme()) Color(0xFF334155) else Color(0xFFE2E8F0)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isUserExpanded = !isThinkExpanded },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = headerText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = headerColor
+                                )
+                                Icon(
+                                    imageVector = if (isThinkExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Toggle thought process",
+                                    tint = headerColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            if (isThinkExpanded) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = parsed.thinkContent,
+                                    fontSize = 12.sp,
+                                    lineHeight = 17.sp,
+                                    color = if (isSystemInDarkTheme()) Color(0xFF94A3B8) else Color(0xFF475569),
+                                    fontStyle = FontStyle.Italic
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (parsed.mainContent.isNotEmpty()) {
                     Text(
-                        text = message.content,
+                        text = parsed.mainContent,
                         color = textColor,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
-                }
-
-                // Telemetry pill (if available on assistant message)
-                if (!message.isUser && message.telemetry != null) {
-                    val tel = message.telemetry
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (isSystemInDarkTheme()) Color(0xFF1E293B)
-                                else Color(0xFFF1F5F9)
-                            )
-                            .border(
-                                1.dp,
-                                if (isSystemInDarkTheme()) Color(0xFF334155)
-                                else Color(0xFFE2E8F0),
-                                RoundedCornerShape(8.dp)
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        val ttftText = if (tel.ttftMs < 1000) {
-                            "${tel.ttftMs}ms"
-                        } else {
-                            String.format(java.util.Locale.US, "%.1fs", tel.ttftMs / 1000.0)
-                        }
-                        val speedText = String.format(java.util.Locale.US, "%.1f", tel.decodeSpeedTokPerSec)
-                        val statusSuffix = if (tel.wasCancelled) " · stopped" else ""
-
-                        Text(
-                            text = "⚡ TTFT: $ttftText (~${tel.promptTokens} prompt tok) · $speedText tok/s (${tel.decodeTokens} tok$statusSuffix)",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (tel.wasCancelled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
-                    }
                 }
                 
                 if (message.ocrText != null) {
@@ -1262,4 +1343,3 @@ fun EmptyStateOnboarding(
     }
 }
 }
-

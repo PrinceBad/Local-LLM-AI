@@ -9,14 +9,18 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.auralocalai.MainActivity
+import com.example.auralocalai.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+
+private const val TAG = "ModelDownloadService"
 
 sealed interface ServiceDownloadState {
     data object Idle : ServiceDownloadState
@@ -38,7 +42,6 @@ class ModelDownloadService : Service() {
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var activeDownloadJob: Job? = null
-
     private lateinit var downloader: ModelDownloader
     private lateinit var notificationManager: NotificationManager
 
@@ -66,7 +69,7 @@ class ModelDownloadService : Service() {
             return START_NOT_STICKY
         }
 
-        // Start Foreground Service
+        // Start Foreground Service safely
         startForegroundServiceCompat(modelId, fileName)
 
         // Cancel any active download before starting a new one
@@ -130,7 +133,7 @@ class ModelDownloadService : Service() {
             }
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -138,7 +141,6 @@ class ModelDownloadService : Service() {
     override fun onDestroy() {
         activeDownloadJob?.cancel()
         serviceJob.cancel()
-        downloadState.value = ServiceDownloadState.Idle
         super.onDestroy()
     }
 
@@ -150,66 +152,79 @@ class ModelDownloadService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Shows progress of model downloads running in the background"
+                setShowBadge(false)
             }
             notificationManager.createNotificationChannel(channel)
         }
     }
 
     private fun startForegroundServiceCompat(modelId: String, fileName: String) {
-        val notification = BuildNotification(
-            title = "Downloading Model",
-            content = "Starting download for $fileName...",
-            progress = 0,
-            indeterminate = true
-        )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        try {
+            val notification = buildNotification(
+                title = "Downloading Model",
+                content = "Starting download for $fileName...",
+                progress = 0,
+                indeterminate = true
             )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground failed (ignoring to allow download to proceed): ${e.message}")
         }
     }
 
     private fun updateProgressNotification(modelId: String, fileName: String, percentage: Int, speed: Double) {
-        val speedText = formatSpeed(speed)
-        val notification = BuildNotification(
-            title = "Downloading $fileName",
-            content = "$percentage% completed • $speedText",
-            progress = percentage,
-            indeterminate = false
-        )
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        try {
+            val speedText = formatSpeed(speed)
+            val notification = buildNotification(
+                title = "Downloading $fileName",
+                content = "$percentage% completed • $speedText",
+                progress = percentage,
+                indeterminate = false
+            )
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.d(TAG, "Notification update skipped: ${e.message}")
+        }
     }
 
     private fun showCompletionNotification(modelId: String, fileName: String, success: Boolean) {
-        val title = if (success) "Download Successful" else "Download Failed"
-        val content = if (success) "Successfully downloaded $fileName." else "Failed to download $fileName."
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        try {
+            val title = if (success) "Download Successful" else "Download Failed"
+            val content = if (success) "Successfully downloaded $fileName." else "Failed to download $fileName."
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(if (success) R.drawable.ic_download_done else R.drawable.ic_download)
+                .setContentTitle(title)
+                .setContentText(content)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .build()
+
+            notificationManager.notify(NOTIFICATION_ID + 1, notification)
+        } catch (e: Exception) {
+            Log.d(TAG, "Completion notification skipped: ${e.message}")
         }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .build()
-
-        notificationManager.notify(NOTIFICATION_ID + 1, notification)
     }
 
-    private fun BuildNotification(title: String, content: String, progress: Int, indeterminate: Boolean): android.app.Notification {
+    private fun buildNotification(title: String, content: String, progress: Int, indeterminate: Boolean): android.app.Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -221,21 +236,22 @@ class ModelDownloadService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_download)
             .setContentTitle(title)
             .setContentText(content)
             .setProgress(100, progress, indeterminate)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setSilent(true)
             .build()
     }
 
     private fun formatSpeed(bytesPerSec: Double): String {
         val mbps = bytesPerSec / (1024 * 1024)
         if (mbps >= 1.0) {
-            return String.format("%.1f MB/s", mbps)
+            return String.format(java.util.Locale.US, "%.1f MB/s", mbps)
         }
         val kbps = bytesPerSec / 1024
-        return String.format("%.1f KB/s", kbps)
+        return String.format(java.util.Locale.US, "%.1f KB/s", kbps)
     }
 }
