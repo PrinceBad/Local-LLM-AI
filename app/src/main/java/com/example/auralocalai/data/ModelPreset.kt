@@ -24,7 +24,8 @@ data class ModelPreset(
     val quantization: String = "INT4",
     val parameterCount: String = "Unknown",
     val contextLength: String = "4,096 tokens",
-    val isReasoningModel: Boolean = false
+    val isReasoningModel: Boolean = false,
+    val expectedSha256: String? = null
 ) {
     companion object {
         fun isReasoningModel(modelId: String?): Boolean {
@@ -55,7 +56,8 @@ data class ModelPreset(
                 quantization = "Q8 (8-bit)",
                 parameterCount = "1.5B",
                 contextLength = "4,096 tokens",
-                isReasoningModel = true
+                isReasoningModel = true,
+                expectedSha256 = "69b35f01759eed765641ab4af589bbe98131fd2825662a086d9037409b8c1295"
             ),
             ModelPreset(
                 id = "qwen-1.5b",
@@ -70,7 +72,8 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY,
                 quantization = "Q8 (8-bit)",
                 parameterCount = "1.5B",
-                contextLength = "4,096 tokens"
+                contextLength = "4,096 tokens",
+                expectedSha256 = "faa60663b333290c1496c499828b21d3e3254a788cacd8cce917ce0f761a2dc9"
             ),
             ModelPreset(
                 id = "qwen3-4b",
@@ -85,7 +88,8 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY,
                 quantization = "mixed INT4",
                 parameterCount = "4.0B",
-                contextLength = "4,096 tokens"
+                contextLength = "4,096 tokens",
+                expectedSha256 = "f0794bc77efeaaf4f7af815f04c483b19b8f2ae4a102cef1b7b760a25848a18e"
             ),
             ModelPreset(
                 id = "qwen2.5-coder-3b",
@@ -100,7 +104,8 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY,
                 quantization = "INT4",
                 parameterCount = "3.0B",
-                contextLength = "4,096 tokens"
+                contextLength = "4,096 tokens",
+                expectedSha256 = "d481c78671e2baf8af60762ad83c4c02610cf067f7c15615c36c82806f687886"
             ),
             ModelPreset(
                 id = "gemma4-e2b",
@@ -115,7 +120,8 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY,
                 quantization = "mixed 2/4/8-bit",
                 parameterCount = "2.4B",
-                contextLength = "8,192 tokens"
+                contextLength = "8,192 tokens",
+                expectedSha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c"
             ),
             ModelPreset(
                 id = "gemma4-e4b",
@@ -130,7 +136,8 @@ data class ModelPreset(
                 backendRestriction = LlmBackendRestriction.ANY,
                 quantization = "mixed 2/4/8-bit",
                 parameterCount = "4.0B",
-                contextLength = "8,192 tokens"
+                contextLength = "8,192 tokens",
+                expectedSha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0"
             )
         )
     }

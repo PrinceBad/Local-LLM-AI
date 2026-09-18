@@ -63,6 +63,8 @@ class ModelDownloadService : Service() {
         val fileName = intent?.getStringExtra("fileName") ?: ""
         val modelId = intent?.getStringExtra("modelId") ?: ""
         val hfToken = intent?.getStringExtra("hfToken") ?: ""
+        val expectedSha256 = intent?.getStringExtra("expectedSha256")?.takeIf { it.isNotBlank() }
+            ?: ModelPreset.presets.find { it.id == modelId }?.expectedSha256
 
         if (url.isBlank() || fileName.isBlank() || modelId.isBlank()) {
             stopSelf()
@@ -80,7 +82,7 @@ class ModelDownloadService : Service() {
             val tempFile = File(storageDir, "$fileName.tmp")
             val destFile = File(storageDir, fileName)
 
-            downloader.downloadModel(url, tempFile, hfToken).collect { state ->
+            downloader.downloadModel(url, tempFile, hfToken, expectedSha256).collect { state ->
                 when (state) {
                     is DownloadState.Idle -> {
                         downloadState.value = ServiceDownloadState.Idle

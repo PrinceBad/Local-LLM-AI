@@ -398,10 +398,10 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadModel(preset: ModelPreset) {
-        downloadModelFromUrl(preset.downloadUrl, preset.fileName, preset.id)
+        downloadModelFromUrl(preset.downloadUrl, preset.fileName, preset.id, preset.expectedSha256)
     }
 
-    fun downloadModelFromUrl(url: String, fileName: String, modelId: String = "custom") {
+    fun downloadModelFromUrl(url: String, fileName: String, modelId: String = "custom", expectedSha256: String? = null) {
         downloadJob?.cancel()
         _uiState.update { 
             it.copy(
@@ -412,6 +412,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
         val context = getApplication<Application>().applicationContext
         val hfToken = tokenStorage.getToken()
+        val resolvedSha256 = expectedSha256?.takeIf { it.isNotBlank() }
+            ?: ModelPreset.presets.find { it.id == modelId }?.expectedSha256
 
         var serviceStarted = false
         try {
@@ -420,6 +422,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 putExtra("fileName", fileName)
                 putExtra("modelId", modelId)
                 putExtra("hfToken", hfToken)
+                if (!resolvedSha256.isNullOrBlank()) putExtra("expectedSha256", resolvedSha256)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -436,7 +439,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 val tempFile = File(storageDir, "$fileName.tmp")
                 val destFile = File(storageDir, fileName)
 
-                downloader.downloadModel(url, tempFile, hfToken).collect { state ->
+                downloader.downloadModel(url, tempFile, hfToken, resolvedSha256).collect { state ->
                     when (state) {
                         is DownloadState.Idle -> {
                             _uiState.update { it.copy(downloadState = DownloadState.Idle) }
