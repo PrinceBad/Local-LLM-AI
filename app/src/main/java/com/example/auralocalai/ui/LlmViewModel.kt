@@ -21,6 +21,14 @@ import com.example.auralocalai.data.ModelDownloadService
 import com.example.auralocalai.data.ModelPreset
 import com.example.auralocalai.data.ChatRepository
 import com.example.auralocalai.data.ModelSafetyValidator
+import com.example.auralocalai.data.SearchContextBuilder
+import com.example.auralocalai.data.SearchIntentDetector
+import com.example.auralocalai.data.SearchIntentResult
+import com.example.auralocalai.data.SearchOutcome
+import com.example.auralocalai.data.SearchSource
+import com.example.auralocalai.data.WebSearchClient
+import com.example.auralocalai.data.WebSearchMode
+import com.example.auralocalai.security.SecretStorage
 import com.example.auralocalai.security.TokenStorageCoordinator
 import com.example.auralocalai.security.TokenStorage
 import com.example.auralocalai.data.ServiceDownloadState
@@ -75,7 +83,8 @@ data class ChatMessage(
     val fileType: String? = null,
     val id: String = java.util.UUID.randomUUID().toString(),
     val telemetry: InferenceTelemetry? = null,
-    val modelId: String? = null
+    val modelId: String? = null,
+    val searchSources: List<SearchSource>? = null
 )
 
 const val DEFAULT_SYSTEM_PROMPT = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise."
@@ -115,7 +124,16 @@ data class UiState(
     val preferredBackend: String = "AUTO",
     val socInfo: SocInfo? = null,
     val importProgress: Float? = null,
-    val modelLoadBenchmarks: Map<String, ModelLoadBenchmark> = emptyMap()
+    val modelLoadBenchmarks: Map<String, ModelLoadBenchmark> = emptyMap(),
+    val webSearchMode: WebSearchMode = WebSearchMode.OFF,
+    val webSearchProviderId: String = "free",
+    val webSearchMaxResults: Int = 5,
+    val searchApiKeyConfigured: Boolean = false,
+    val isSearching: Boolean = false,
+    val activeSearchQuery: String? = null,
+    val searchDisclosureAcknowledged: Boolean = false,
+    val chatSearchOverride: WebSearchMode? = null,
+    val webSearchError: String? = null
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
@@ -128,6 +146,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     ).apply { mkdirs() }
     private val downloader = ModelDownloader()
     private val inferenceEngine = LlmInferenceEngine(application.applicationContext)
+    private val webSearchClient = WebSearchClient()
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
@@ -260,13 +279,22 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val initialContextWindow = prefs.getInt("context_window_size", 6)
         val initialSystemPrompt = prefs.getString("system_prompt", DEFAULT_SYSTEM_PROMPT) ?: DEFAULT_SYSTEM_PROMPT
         val initialPreferredBackend = prefs.getString("preferred_backend", "AUTO") ?: "AUTO"
+        val initialSearchModeStr = prefs.getString("web_search_mode", "OFF") ?: "OFF"
+        val initialSearchMode = try { WebSearchMode.valueOf(initialSearchModeStr) } catch (_: Throwable) { WebSearchMode.OFF }
+        val initialSearchProvider = prefs.getString("web_search_provider", "free") ?: "free"
+        val initialMaxResults = prefs.getInt("web_search_max_results", 5)
+        val initialDisclosure = prefs.getBoolean("web_search_disclosure_acknowledged", false)
         _uiState.update { 
             it.copy(
                 hfToken = initialHfToken,
                 contextWindowSize = initialContextWindow,
                 systemPrompt = initialSystemPrompt,
                 preferredBackend = initialPreferredBackend,
-                socInfo = inferenceEngine.socInfo
+                socInfo = inferenceEngine.socInfo,
+                webSearchMode = initialSearchMode,
+                webSearchProviderId = initialSearchProvider,
+                webSearchMaxResults = initialMaxResults,
+                searchDisclosureAcknowledged = initialDisclosure
             ) 
         }
 
@@ -319,7 +347,16 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val token = tokenStorage.getToken()
             val degraded = !tokenStorage.isHardwareEncrypted
             val benchmarks = loadBenchmarksFromPrefs()
-            _uiState.update { it.copy(messages = history, hfToken = token, isKeystoreDegraded = degraded, modelLoadBenchmarks = benchmarks) }
+            val searchKey = tokenStorage.getSecret(SecretStorage.KEY_SEARCH_API_KEY)
+            _uiState.update {
+                it.copy(
+                    messages = history,
+                    hfToken = token,
+                    isKeystoreDegraded = degraded,
+                    modelLoadBenchmarks = benchmarks,
+                    searchApiKeyConfigured = searchKey.isNotBlank()
+                )
+            }
 
             // 1. Migrate any models from old storage directories safely
             migrateExistingModels()
@@ -585,8 +622,67 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopGeneration() {
         inferenceJob?.cancel()
-        _uiState.update { it.copy(isGenerating = false) }
+        _uiState.update { it.copy(isGenerating = false, isSearching = false, activeSearchQuery = null) }
         saveMessages(_uiState.value.messages)
+    }
+
+    fun setWebSearchMode(mode: WebSearchMode) {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("web_search_mode", mode.name).apply()
+        _uiState.update { it.copy(webSearchMode = mode) }
+    }
+
+    fun setWebSearchProvider(providerId: String) {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("web_search_provider", providerId).apply()
+        _uiState.update { it.copy(webSearchProviderId = providerId) }
+    }
+
+    fun setWebSearchMaxResults(maxResults: Int) {
+        val clamped = maxResults.coerceIn(3, 8)
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putInt("web_search_max_results", clamped).apply()
+        _uiState.update { it.copy(webSearchMaxResults = clamped) }
+    }
+
+    fun saveSearchApiKey(key: String): Boolean {
+        val success = tokenStorage.saveSecret(SecretStorage.KEY_SEARCH_API_KEY, key.trim())
+        if (success) {
+            _uiState.update { it.copy(searchApiKeyConfigured = key.isNotBlank()) }
+        }
+        return success
+    }
+
+    fun clearSearchApiKey(): Boolean {
+        val success = tokenStorage.clearSecret(SecretStorage.KEY_SEARCH_API_KEY)
+        if (success) {
+            _uiState.update { it.copy(searchApiKeyConfigured = false) }
+        }
+        return success
+    }
+
+    fun setChatSearchOverride(mode: WebSearchMode?) {
+        _uiState.update { it.copy(chatSearchOverride = mode) }
+    }
+
+    fun acknowledgeSearchDisclosure() {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("web_search_disclosure_acknowledged", true).apply()
+        _uiState.update { it.copy(searchDisclosureAcknowledged = true) }
+    }
+
+    suspend fun testSearch(query: String = "local AI news"): SearchOutcome {
+        val providerId = _uiState.value.webSearchProviderId
+        val apiKey = tokenStorage.getSecret(SecretStorage.KEY_SEARCH_API_KEY)
+        val locale = java.util.Locale.getDefault()
+        return webSearchClient.search(
+            providerId = providerId,
+            query = query,
+            apiKey = apiKey,
+            maxResults = 3,
+            country = locale.country.lowercase().ifBlank { "us" },
+            language = locale.language.lowercase().ifBlank { "en" }
+        )
     }
 
     fun cancelLoading() {
@@ -981,23 +1077,122 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         saveMessages(currentMessages)
 
         inferenceJob = viewModelScope.launch {
-            val systemHeader = "System: ${uiState.value.systemPrompt}\n\n"
-            
             val activeModel = _uiState.value.activeModelId
-            
-            val history = currentMessages.takeLast(uiState.value.contextWindowSize).joinToString("\n") { msg ->
-                if (msg.isUser) {
-                    val prefix = when {
-                        // Skip OCR context injection for Gemma 4 native multimodal vision model to let it analyze natively
-                        msg.ocrText != null && activeModel != "gemma4-e2b" && activeModel != "gemma4-e4b" -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
-                        else -> ""
+            val activePreset = ModelPreset.presets.find { it.id == activeModel || it.fileName == activeModel }
+            val contextCapacity = activePreset?.contextLength?.replace(Regex("[^0-9]"), "")?.toIntOrNull() ?: 4096
+            val charBudget = SearchContextBuilder.resolveCharBudget(contextCapacity)
+
+            val effectiveMode = _uiState.value.chatSearchOverride ?: _uiState.value.webSearchMode
+            if (_uiState.value.chatSearchOverride != null) {
+                _uiState.update { it.copy(chatSearchOverride = null) }
+            }
+            val providerId = _uiState.value.webSearchProviderId
+            val maxResults = _uiState.value.webSearchMaxResults
+            val isFree = providerId == "free"
+
+            // Look up previous user turn for follow-up query resolution
+            val previousUserMsg = currentMessages.dropLast(1).lastOrNull { it.isUser }?.content
+
+            var searchOutcome: SearchOutcome? = null
+            val queryToSearch: String? = when (effectiveMode) {
+                WebSearchMode.OFF -> null
+                WebSearchMode.ALWAYS -> SearchIntentDetector.resolveQuery(messageText, previousUserMsg)
+                WebSearchMode.AUTO -> {
+                    when (val intent = SearchIntentDetector.detectIntent(messageText, isFreeProvider = isFree, previousUserMessage = previousUserMsg)) {
+                        is SearchIntentResult.NeedsSearch -> intent.cleanQuery
+                        is SearchIntentResult.DirectUrl -> intent.url
+                        is SearchIntentResult.NoSearch -> null
                     }
-                    "User: $prefix${msg.content}"
-                } else {
-                    "AI: ${msg.content}"
                 }
             }
-            val fullPrompt = "$systemHeader$history\nAI: "
+
+            if (!queryToSearch.isNullOrBlank()) {
+                _uiState.update { it.copy(isSearching = true, activeSearchQuery = queryToSearch, webSearchError = null) }
+                try {
+                    val apiKey = tokenStorage.getSecret(SecretStorage.KEY_SEARCH_API_KEY)
+                    val locale = java.util.Locale.getDefault()
+                    val country = locale.country.lowercase().ifBlank { "us" }
+                    val language = locale.language.lowercase().ifBlank { "en" }
+
+                    searchOutcome = webSearchClient.search(
+                        providerId = providerId,
+                        query = queryToSearch,
+                        apiKey = apiKey,
+                        maxResults = maxResults,
+                        country = country,
+                        language = language
+                    )
+                    if (searchOutcome.isError) {
+                        _uiState.update { it.copy(webSearchError = searchOutcome.errorMessage) }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("LlmViewModel", "Web search failed: ${e.message}")
+                    searchOutcome = SearchOutcome(
+                        query = queryToSearch,
+                        sources = emptyList(),
+                        providerId = providerId,
+                        isError = true,
+                        errorMessage = e.message
+                    )
+                    _uiState.update { it.copy(webSearchError = e.message) }
+                } finally {
+                    _uiState.update { it.copy(isSearching = false, activeSearchQuery = null) }
+                }
+            }
+
+            // Build search injection block if results exist or if Always mode failed
+            val searchBlock = when {
+                searchOutcome != null && searchOutcome.sources.isNotEmpty() -> {
+                    SearchContextBuilder.build(searchOutcome.query, searchOutcome.sources, maxTotalChars = charBudget)
+                }
+                searchOutcome != null && searchOutcome.isError && (effectiveMode == WebSearchMode.ALWAYS) -> {
+                    SearchContextBuilder.buildFailureNote(searchOutcome.query)
+                }
+                else -> ""
+            }
+
+            val hasSearchContext = searchBlock.isNotBlank()
+            val systemInstruction = if (hasSearchContext) {
+                "${uiState.value.systemPrompt}\n\n${SearchContextBuilder.SYSTEM_SEARCH_INSTRUCTION}"
+            } else {
+                uiState.value.systemPrompt
+            }
+            val systemHeader = "System: $systemInstruction\n\n"
+
+            // Exclude current message from history to position search context defensively
+            val historyTurnBudget = if (hasSearchContext) {
+                (uiState.value.contextWindowSize - 2).coerceAtLeast(2)
+            } else {
+                uiState.value.contextWindowSize
+            }
+
+            val previousHistoryList = currentMessages.dropLast(1).takeLast(historyTurnBudget)
+            val history = if (previousHistoryList.isNotEmpty()) {
+                previousHistoryList.joinToString("\n") { msg ->
+                    if (msg.isUser) {
+                        val prefix = when {
+                            msg.ocrText != null && activeModel != "gemma4-e2b" && activeModel != "gemma4-e4b" -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
+                            else -> ""
+                        }
+                        "User: $prefix${msg.content}"
+                    } else {
+                        "AI: ${msg.content}"
+                    }
+                } + "\n\n"
+            } else {
+                ""
+            }
+
+            val currentPrefix = when {
+                ocrText != null && activeModel != "gemma4-e2b" && activeModel != "gemma4-e4b" -> "[Extracted Text from Attachment: ${ocrText}]\n"
+                else -> ""
+            }
+            val currentUserTurn = "User: $currentPrefix$messageText"
+
+            val searchPart = if (searchBlock.isNotBlank()) "$searchBlock\n\n" else ""
+            val fullPrompt = "$systemHeader$history$searchPart$currentUserTurn\nAI: "
 
             // Extract downsampled bitmap natively if a vision-capable model is loaded and image is attached
             val imageBitmap: Bitmap? = if (imageUri != null && (activeModel == "gemma4-e2b" || activeModel == "gemma4-e4b")) {
@@ -1014,9 +1209,15 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             var wasCancelled = false
             var accumulatedText = ""
             var lastUpdateTime = System.currentTimeMillis()
+            val sourcesToAttach = searchOutcome?.sources?.takeIf { it.isNotEmpty() }
 
             try {
-                val aiMessagePlaceholder = ChatMessage("", isUser = false, modelId = activeModel)
+                val aiMessagePlaceholder = ChatMessage(
+                    content = "",
+                    isUser = false,
+                    modelId = activeModel,
+                    searchSources = sourcesToAttach
+                )
                 _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
                 inferenceEngine.generateResponse(fullPrompt, imageBitmap)
@@ -1080,12 +1281,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         val oldMessage = updatedMessages.last()
                         updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(
                             content = accumulatedText,
-                            telemetry = telemetry
+                            telemetry = telemetry,
+                            searchSources = sourcesToAttach
                         )
                     }
-                    state.copy(messages = updatedMessages, isGenerating = false)
+                    state.copy(messages = updatedMessages, isGenerating = false, isSearching = false, activeSearchQuery = null)
                 }
-                imageBitmap?.recycle()
                 saveMessages(_uiState.value.messages)
             }
         }

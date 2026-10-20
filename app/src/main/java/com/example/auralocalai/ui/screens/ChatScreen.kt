@@ -61,7 +61,10 @@ import android.speech.RecognizerIntent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.ui.graphics.graphicsLayer
+import com.example.auralocalai.data.SearchContextBuilder
+import com.example.auralocalai.data.WebSearchMode
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -77,6 +80,7 @@ fun ChatScreen(
     var textInput by remember { mutableStateOf("") }
     val context = LocalContext.current
     var showAttachmentMenu by remember { mutableStateOf(false) }
+    var showSearchDisclosureDialog by remember { mutableStateOf(false) }
 
     var isListening by remember { mutableStateOf(false) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
@@ -398,6 +402,35 @@ fun ChatScreen(
 
             // Bottom text inputs (or loading/error state card)
             if (uiState.modelState is ModelState.Loaded) {
+                if (uiState.isSearching) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Searching web for \"${uiState.activeSearchQuery ?: ""}\"…",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -620,6 +653,43 @@ fun ChatScreen(
                                         )
                                     }
                                 }
+
+                                // Web search mode toggle button (Off -> Auto -> Always -> Off)
+                                val effectiveSearchMode = uiState.chatSearchOverride ?: uiState.webSearchMode
+                                val searchIconTint = when (effectiveSearchMode) {
+                                    WebSearchMode.OFF -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                    WebSearchMode.AUTO -> MaterialTheme.colorScheme.primary
+                                    WebSearchMode.ALWAYS -> Color(0xFF16A34A)
+                                }
+                                val searchModeLabel = when (effectiveSearchMode) {
+                                    WebSearchMode.OFF -> "Web Search: Off"
+                                    WebSearchMode.AUTO -> "Web Search: Auto"
+                                    WebSearchMode.ALWAYS -> "Web Search: Always"
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        val nextMode = when (effectiveSearchMode) {
+                                            WebSearchMode.OFF -> WebSearchMode.AUTO
+                                            WebSearchMode.AUTO -> WebSearchMode.ALWAYS
+                                            WebSearchMode.ALWAYS -> WebSearchMode.OFF
+                                        }
+                                        if (nextMode != WebSearchMode.OFF && !uiState.searchDisclosureAcknowledged) {
+                                            showSearchDisclosureDialog = true
+                                        } else {
+                                            viewModel.setChatSearchOverride(nextMode)
+                                        }
+                                    },
+                                    enabled = !uiState.isGenerating,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.TravelExplore,
+                                        contentDescription = searchModeLabel,
+                                        tint = searchIconTint,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                             
                             Spacer(modifier = Modifier.width(4.dp))
@@ -732,6 +802,53 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+
+        if (showSearchDisclosureDialog) {
+            AlertDialog(
+                onDismissRequest = { showSearchDisclosureDialog = false },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.TravelExplore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Web Search Privacy Disclosure",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Aura Local AI runs models privately on-device. When Web Search is enabled, queries and pasted URLs are sent over the internet to third-party search providers (DuckDuckGo, Wikipedia, Brave, or Serper) to retrieve fresh context.\n\nNever search confidential or personally identifying information.",
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.acknowledgeSearchDisclosure()
+                            viewModel.setChatSearchOverride(WebSearchMode.AUTO)
+                            showSearchDisclosureDialog = false
+                        }
+                    ) {
+                        Text("Enable Search")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showSearchDisclosureDialog = false }
+                    ) {
+                        Text("Keep Offline")
+                    }
+                }
+            )
         }
     }
 }
@@ -1034,6 +1151,126 @@ fun ChatBubble(
                         lineHeight = 22.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
+                }
+
+                // Grounded search sources card
+                if (!message.isUser && !message.searchSources.isNullOrEmpty()) {
+                    val sources = message.searchSources
+                    var isSourcesExpanded by remember(message.id) { mutableStateOf(false) }
+                    val context = LocalContext.current
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSystemInDarkTheme()) Color(0xFF1E293B).copy(alpha = 0.6f) else Color(0xFFF1F5F9)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSystemInDarkTheme()) Color(0xFF334155) else Color(0xFFE2E8F0)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isSourcesExpanded = !isSourcesExpanded },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.TravelExplore,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Sources (${sources.size})",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Icon(
+                                    imageVector = if (isSourcesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Toggle sources",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            if (isSourcesExpanded) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    sources.forEachIndexed { index, source ->
+                                        val cleanTitle = SearchContextBuilder.sanitize(source.title).ifBlank { source.domain }
+                                        val cleanSnippet = SearchContextBuilder.sanitize(source.snippet)
+                                        val isValidUrl = SearchContextBuilder.isValidHttpUrl(source.url)
+
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .then(
+                                                    if (isValidUrl) {
+                                                        Modifier.clickable {
+                                                            try {
+                                                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
+                                                                context.startActivity(browserIntent)
+                                                            } catch (e: Exception) {
+                                                                // ignore if no browser app
+                                                            }
+                                                        }
+                                                    } else Modifier
+                                                )
+                                                .padding(4.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "[${index + 1}]",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    text = cleanTitle,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (isValidUrl) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1
+                                                )
+                                                if (source.domain.isNotBlank()) {
+                                                    Text(
+                                                        text = "(${source.domain})",
+                                                        fontSize = 10.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                            if (cleanSnippet.isNotBlank()) {
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = cleanSnippet,
+                                                    fontSize = 11.sp,
+                                                    lineHeight = 15.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 3
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 if (message.ocrText != null) {

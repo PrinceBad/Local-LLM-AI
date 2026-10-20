@@ -14,10 +14,14 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.TravelExplore
+import com.example.auralocalai.data.WebSearchMode
+import com.example.auralocalai.data.SearchOutcome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,6 +63,11 @@ fun SettingsScreen(
     
     var isValidating by remember { mutableStateOf(false) }
     var validationResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+
+    var searchKeyInput by remember { mutableStateOf("") }
+    var isSearchKeyVisible by remember { mutableStateOf(false) }
+    var isTestingSearch by remember { mutableStateOf(false) }
+    var testSearchResult by remember { mutableStateOf<SearchOutcome?>(null) }
 
     Scaffold(
         topBar = {
@@ -319,6 +328,389 @@ fun SettingsScreen(
                                     color = if (isSuccess) MaterialTheme.colorScheme.onTertiaryContainer
                                             else MaterialTheme.colorScheme.onErrorContainer
                                 )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Web Search Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TravelExplore,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "Web Search",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Status chip
+                        val isKeyedProvider = uiState.webSearchProviderId != "free"
+                        val (statusText, statusBg, statusFg) = when {
+                            uiState.webSearchMode == WebSearchMode.OFF -> Triple("Disabled", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+                            isKeyedProvider && !uiState.searchApiKeyConfigured -> Triple("Needs API Key", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                            else -> Triple("Active (${uiState.webSearchMode.name})", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = statusBg,
+                            modifier = Modifier.padding(start = 4.dp)
+                        ) {
+                            Text(
+                                text = statusText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = statusFg,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Connect local models to real-time information from the web. Aura sanitizes and injects search results directly into the local model prompt.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 17.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 1. Search Mode Section
+                    Text(
+                        text = "Trigger Mode",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    val searchModes = listOf(
+                        WebSearchMode.OFF to ("Off" to "Never perform web search"),
+                        WebSearchMode.AUTO to ("Auto" to "Detect when real-time information is needed"),
+                        WebSearchMode.ALWAYS to ("Always" to "Search the web for every user prompt")
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        searchModes.forEach { (mode, pair) ->
+                            val (title, description) = pair
+                            val isSelected = uiState.webSearchMode == mode
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        viewModel.setWebSearchMode(mode)
+                                        if (mode != WebSearchMode.OFF && !uiState.searchDisclosureAcknowledged) {
+                                            viewModel.acknowledgeSearchDisclosure()
+                                        }
+                                    },
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = {
+                                            viewModel.setWebSearchMode(mode)
+                                            if (mode != WebSearchMode.OFF && !uiState.searchDisclosureAcknowledged) {
+                                                viewModel.acknowledgeSearchDisclosure()
+                                            }
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = title,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = description,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 2. Search Provider Section
+                    Text(
+                        text = "Search Provider",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    val providers = listOf(
+                        Triple("free", "Built-in Free (DuckDuckGo & Wikipedia)", "No API key required. Entity and encyclopedic lookups only."),
+                        Triple("brave", "Brave Search (Recommended)", "BYO API key. High-quality LLM Context API with full grounding."),
+                        Triple("serper", "Serper (Google Search)", "BYO API key. Google web search results & answer boxes.")
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        providers.forEach { (id, name, desc) ->
+                            val isSelected = uiState.webSearchProviderId == id
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.setWebSearchProvider(id) },
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { viewModel.setWebSearchProvider(id) }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = name,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = desc,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. API Key Input (if Brave or Serper selected)
+                    if (uiState.webSearchProviderId != "free") {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Provider API Key (${if (uiState.webSearchProviderId == "brave") "Brave Search" else "Serper"})",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        OutlinedTextField(
+                            value = searchKeyInput,
+                            onValueChange = { searchKeyInput = it.trim() },
+                            label = { Text("Enter API Key") },
+                            placeholder = { Text(if (uiState.searchApiKeyConfigured) "••••••••••••••••" else "Paste API Key") },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = if (isSearchKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { isSearchKeyVisible = !isSearchKeyVisible }) {
+                                    Icon(
+                                        imageVector = if (isSearchKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (isSearchKeyVisible) "Hide Key" else "Show Key"
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (searchKeyInput.isNotBlank()) {
+                                        viewModel.saveSearchApiKey(searchKeyInput)
+                                        searchKeyInput = ""
+                                    }
+                                },
+                                enabled = searchKeyInput.isNotBlank(),
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) {
+                                Text("Save Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            if (uiState.searchApiKeyConfigured) {
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.clearSearchApiKey()
+                                        searchKeyInput = ""
+                                    },
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(38.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Remove Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 4. Max Sources Slider
+                    Text(
+                        text = "Max Search Results: ${uiState.webSearchMaxResults} sources",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = uiState.webSearchMaxResults.toFloat(),
+                        onValueChange = { viewModel.setWebSearchMaxResults(it.toInt()) },
+                        valueRange = 3f..8f,
+                        steps = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "Controls number of web citations injected into the prompt context.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 5. Test Search Connection Button
+                    Button(
+                        onClick = {
+                            isTestingSearch = true
+                            testSearchResult = null
+                            scope.launch {
+                                try {
+                                    val outcome = viewModel.testSearch("local AI news")
+                                    testSearchResult = outcome
+                                } catch (e: Exception) {
+                                    testSearchResult = SearchOutcome(
+                                        query = "local AI news",
+                                        sources = emptyList(),
+                                        providerId = uiState.webSearchProviderId,
+                                        isError = true,
+                                        errorMessage = e.message
+                                    )
+                                } finally {
+                                    isTestingSearch = false
+                                }
+                            }
+                        },
+                        enabled = !isTestingSearch,
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        if (isTestingSearch) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onSecondary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Testing Search…", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("Test Search Connection", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Test Result Display
+                    testSearchResult?.let { result ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        val isSuccess = !result.isError && result.sources.isNotEmpty()
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSuccess) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f)
+                                                else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isSuccess) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f)
+                                else MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
+                                        contentDescription = null,
+                                        tint = if (isSuccess) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = if (isSuccess) "Connection verified: ${result.sources.size} sources retrieved via ${result.providerId}"
+                                               else "Search failed: ${result.errorMessage ?: "No sources returned"}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isSuccess) MaterialTheme.colorScheme.onTertiaryContainer
+                                                else MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                if (isSuccess && result.sources.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Sample: ${result.sources.first().title} (${result.sources.first().domain})",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }

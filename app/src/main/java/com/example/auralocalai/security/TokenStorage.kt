@@ -8,8 +8,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.example.auralocalai.BuildConfig
 
-sealed interface TokenStorage {
-    val isHardwareEncrypted: Boolean
+interface TokenStorage : SecretStorage {
+    override val isHardwareEncrypted: Boolean
     fun getToken(): String
     fun saveToken(token: String): Boolean // synchronous .commit()
     fun clearToken(): Boolean
@@ -21,6 +21,10 @@ class EncryptedTokenStorage(private val prefs: SharedPreferences) : TokenStorage
     override fun saveToken(token: String): Boolean = prefs.edit().putString(KEY_HF_TOKEN, token).commit()
     override fun clearToken(): Boolean = prefs.edit().remove(KEY_HF_TOKEN).commit()
 
+    override fun getSecret(key: String): String = prefs.getString(key, "") ?: ""
+    override fun saveSecret(key: String, value: String): Boolean = prefs.edit().putString(key, value).commit()
+    override fun clearSecret(key: String): Boolean = prefs.edit().remove(key).commit()
+
     companion object {
         const val KEY_HF_TOKEN = "hf_token"
     }
@@ -31,6 +35,10 @@ class DegradedTokenStorage(private val prefs: SharedPreferences) : TokenStorage 
     override fun getToken(): String = prefs.getString(KEY_HF_TOKEN, "") ?: ""
     override fun saveToken(token: String): Boolean = prefs.edit().putString(KEY_HF_TOKEN, token).commit()
     override fun clearToken(): Boolean = prefs.edit().remove(KEY_HF_TOKEN).commit()
+
+    override fun getSecret(key: String): String = prefs.getString(key, "") ?: ""
+    override fun saveSecret(key: String, value: String): Boolean = prefs.edit().putString(key, value).commit()
+    override fun clearSecret(key: String): Boolean = prefs.edit().remove(key).commit()
 
     companion object {
         const val KEY_HF_TOKEN = "hf_token"
@@ -111,6 +119,15 @@ object TokenStorageCoordinator {
                         }
                     }
 
+                    val degradedSearchKey = degradedPrefs.getString(SecretStorage.KEY_SEARCH_API_KEY, null)
+                    if (!degradedSearchKey.isNullOrBlank()) {
+                        val writeKeySuccess = storage.saveSecret(SecretStorage.KEY_SEARCH_API_KEY, degradedSearchKey)
+                        if (writeKeySuccess) {
+                            degradedPrefs.edit().remove(SecretStorage.KEY_SEARCH_API_KEY).commit()
+                            Log.i(TAG, "Successfully migrated degraded search key into restored encrypted storage.")
+                        }
+                    }
+
                     // Reset degraded flags ONLY after confirmed migration write
                     appPrefs.edit()
                         .putBoolean(KEYSTORE_DEGRADED, false)
@@ -130,6 +147,16 @@ object TokenStorageCoordinator {
                         if (writeSuccess) {
                             degradedPrefs.edit().remove(DegradedTokenStorage.KEY_HF_TOKEN).commit()
                             Log.i(TAG, "Migrated orphaned degraded token into encrypted storage.")
+                        }
+                    }
+                }
+
+                if (storage.getSecret(SecretStorage.KEY_SEARCH_API_KEY).isBlank()) {
+                    val orphanedSearchKey = degradedPrefs.getString(SecretStorage.KEY_SEARCH_API_KEY, null)
+                    if (!orphanedSearchKey.isNullOrBlank()) {
+                        val writeKeySuccess = storage.saveSecret(SecretStorage.KEY_SEARCH_API_KEY, orphanedSearchKey)
+                        if (writeKeySuccess) {
+                            degradedPrefs.edit().remove(SecretStorage.KEY_SEARCH_API_KEY).commit()
                         }
                     }
                 }
