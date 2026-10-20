@@ -1,5 +1,6 @@
 package com.example.auralocalai.data
 
+import androidx.compose.runtime.Immutable
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -10,6 +11,7 @@ enum class LlmBackendRestriction {
     NPU_ONLY
 }
 
+@Immutable
 data class ModelPreset(
     val id: String,
     val name: String,
@@ -28,16 +30,30 @@ data class ModelPreset(
     val expectedSha256: String? = null
 ) {
     companion object {
+        val presetsById: Map<String, ModelPreset> by lazy {
+            presets.associateBy { it.id.lowercase() }
+        }
+
+        val presetsByFileName: Map<String, ModelPreset> by lazy {
+            presets.associateBy { it.fileName.lowercase() }
+        }
+
+        fun findByIdOrFileName(identifier: String?): ModelPreset? {
+            if (identifier == null) return null
+            val lower = identifier.lowercase()
+            return presetsById[lower] ?: presetsByFileName[lower]
+        }
+
         fun isReasoningModel(modelId: String?): Boolean {
             if (modelId == null) return false
-            val preset = presets.find { it.id.equals(modelId, ignoreCase = true) }
+            val preset = presetsById[modelId.lowercase()]
             if (preset != null) return preset.isReasoningModel
             return modelId.contains("deepseek", ignoreCase = true) || modelId.contains("qwq", ignoreCase = true)
         }
 
         fun isKnownNonReasoningModel(modelId: String?): Boolean {
             if (modelId == null) return false
-            val preset = presets.find { it.id.equals(modelId, ignoreCase = true) }
+            val preset = presetsById[modelId.lowercase()]
             return preset != null && !preset.isReasoningModel
         }
 

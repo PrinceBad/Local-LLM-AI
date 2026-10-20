@@ -47,6 +47,11 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import androidx.compose.runtime.Immutable
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -54,6 +59,7 @@ import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+@Immutable
 @Serializable
 data class InferenceTelemetry(
     val ttftMs: Long,
@@ -63,6 +69,7 @@ data class InferenceTelemetry(
     val wasCancelled: Boolean = false
 )
 
+@Immutable
 @Serializable
 data class ModelLoadBenchmark(
     val coldLoadMs: Long? = null,
@@ -70,6 +77,7 @@ data class ModelLoadBenchmark(
     val sampleCount: Int = 0
 )
 
+@Immutable
 @Serializable
 data class ChatMessage(
     val content: String,
@@ -96,6 +104,7 @@ sealed interface ModelState {
     data class Error(val message: String) : ModelState
 }
 
+@Immutable
 data class UiState(
     val messages: List<ChatMessage> = emptyList(),
     val isGenerating: Boolean = false,
@@ -149,6 +158,15 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     private val webSearchClient = WebSearchClient()
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /**
+     * Isolated theme stream to prevent entire root Activity and Nav tree
+     * from recomposing on every LLM token or download progress tick.
+     */
+    val themeMode: StateFlow<ThemeMode> = _uiState
+        .map { it.themeMode }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
 
     private var downloadJob: Job? = null
     private var loadModelJob: Job? = null
@@ -453,7 +471,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val context = getApplication<Application>().applicationContext
         val hfToken = tokenStorage.getToken()
         val resolvedSha256 = expectedSha256?.takeIf { it.isNotBlank() }
-            ?: ModelPreset.presets.find { it.id == modelId }?.expectedSha256
+            ?: ModelPreset.findByIdOrFileName(modelId)?.expectedSha256
 
         var serviceStarted = false
         try {
@@ -613,7 +631,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
         // If a model is currently loaded, re-load with new backend preference
         val activeId = _uiState.value.activeModelId
-        val activePreset = ModelPreset.presets.firstOrNull { it.id == activeId }
+        val activePreset = ModelPreset.findByIdOrFileName(activeId)
         val fileName = activePreset?.fileName ?: _uiState.value.localModels.firstOrNull()
         if (fileName != null && activeId != null) {
             loadModel(fileName, activeId)
@@ -1078,7 +1096,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
         inferenceJob = viewModelScope.launch {
             val activeModel = _uiState.value.activeModelId
-            val activePreset = ModelPreset.presets.find { it.id == activeModel || it.fileName == activeModel }
+            val activePreset = ModelPreset.findByIdOrFileName(activeModel)
             val contextCapacity = activePreset?.contextLength?.replace(Regex("[^0-9]"), "")?.toIntOrNull() ?: 4096
             val charBudget = SearchContextBuilder.resolveCharBudget(contextCapacity)
 
@@ -1207,7 +1225,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             var tFirst: Long? = null
             var tokenCount = 0
             var wasCancelled = false
-            var accumulatedText = ""
+            val accumulatedBuilder = StringBuilder(1024)
             var lastUpdateTime = System.currentTimeMillis()
             val sourcesToAttach = searchOutcome?.sources?.takeIf { it.isNotEmpty() }
 
@@ -1231,14 +1249,15 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                             tFirst = System.nanoTime()
                         }
                         tokenCount++
-                        accumulatedText += partialToken
+                        accumulatedBuilder.append(partialToken)
                         val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastUpdateTime > 100) {
+                        if (currentTime - lastUpdateTime > 80) {
+                            val currentSnapshot = accumulatedBuilder.toString()
                             _uiState.update { state ->
-                                val updatedMessages = state.messages.toMutableList()
+                                val updatedMessages = ArrayList(state.messages)
                                 if (updatedMessages.isNotEmpty()) {
                                     val oldMessage = updatedMessages.last()
-                                    updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = accumulatedText)
+                                    updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = currentSnapshot)
                                 }
                                 state.copy(messages = updatedMessages)
                             }
@@ -1249,8 +1268,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 wasCancelled = true
                 throw e
             } catch (e: Exception) {
-                if (accumulatedText.isEmpty()) {
-                    accumulatedText = friendlyErrorMessage(e.message)
+                if (accumulatedBuilder.isEmpty()) {
+                    accumulatedBuilder.append(friendlyErrorMessage(e.message))
                 }
             } finally {
                 imageBitmap?.recycle()
@@ -1275,12 +1294,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } else null
 
+                val finalContent = accumulatedBuilder.toString()
                 _uiState.update { state ->
-                    val updatedMessages = state.messages.toMutableList()
+                    val updatedMessages = ArrayList(state.messages)
                     if (updatedMessages.isNotEmpty()) {
                         val oldMessage = updatedMessages.last()
                         updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(
-                            content = accumulatedText,
+                            content = finalContent,
                             telemetry = telemetry,
                             searchSources = sourcesToAttach
                         )

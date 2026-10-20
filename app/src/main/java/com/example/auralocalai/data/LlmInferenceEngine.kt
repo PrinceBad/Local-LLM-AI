@@ -327,7 +327,7 @@ class LlmInferenceEngine(private val context: Context) {
             // Build multimodal message if an image input is present
             val message = if (image != null) {
                 val stream = ByteArrayOutputStream()
-                image.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                image.compress(Bitmap.CompressFormat.JPEG, 85, stream)
                 val byteArray = stream.toByteArray()
                 
                 val imageContent = Content.ImageBytes(byteArray)

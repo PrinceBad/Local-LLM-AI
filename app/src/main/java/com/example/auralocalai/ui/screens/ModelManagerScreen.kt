@@ -168,8 +168,7 @@ fun ModelManagerScreen(
                     isDownloading = isDownloading,
                     isLoading = isLoadingThisModel,
                     isOtherLoading = isOtherLoading,
-                    downloadState = uiState.downloadState,
-                    modelState = uiState.modelState,
+                    downloadState = if (isDownloading) uiState.downloadState else DownloadState.Idle,
                     loadingStage = if (isLoadingThisModel) uiState.loadingStage else null,
                     benchmark = benchmark,
                     onDownload = { viewModel.downloadModel(preset) },
@@ -182,7 +181,7 @@ fun ModelManagerScreen(
 
             // Sideloaded Custom Models List
             val customModels = uiState.localModels.filter { fileName ->
-                ModelPreset.presets.none { it.fileName == fileName }
+                !ModelPreset.presetsByFileName.containsKey(fileName.lowercase())
             }
             if (customModels.isNotEmpty()) {
                 item {
@@ -386,7 +385,6 @@ fun PresetModelCard(
     isLoading: Boolean,
     isOtherLoading: Boolean,
     downloadState: DownloadState,
-    modelState: ModelState,
     loadingStage: String? = null,
     benchmark: com.example.auralocalai.ui.ModelLoadBenchmark? = null,
     onDownload: () -> Unit,

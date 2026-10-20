@@ -64,7 +64,7 @@ class ModelDownloadService : Service() {
         val modelId = intent?.getStringExtra("modelId") ?: ""
         val hfToken = intent?.getStringExtra("hfToken") ?: ""
         val expectedSha256 = intent?.getStringExtra("expectedSha256")?.takeIf { it.isNotBlank() }
-            ?: ModelPreset.presets.find { it.id == modelId }?.expectedSha256
+            ?: ModelPreset.findByIdOrFileName(modelId)?.expectedSha256
 
         if (url.isBlank() || fileName.isBlank() || modelId.isBlank()) {
             stopSelf()

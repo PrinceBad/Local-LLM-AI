@@ -1,11 +1,13 @@
 package com.example.auralocalai.data
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 /**
  * Represents a single web search or extracted page source.
  * Persisted in ChatMessage so citations and sources survive app restarts.
  */
+@Immutable
 @Serializable
 data class SearchSource(
     val title: String,
@@ -18,6 +20,7 @@ data class SearchSource(
 /**
  * The final outcome of an executed web search query.
  */
+@Immutable
 data class SearchOutcome(
     val query: String,
     val sources: List<SearchSource>,

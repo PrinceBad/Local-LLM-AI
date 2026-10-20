@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -363,11 +364,11 @@ fun ChatScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(
+                    itemsIndexed(
                         items = uiState.messages,
-                        key = { it.id }
-                    ) { message ->
-                        val isLastMessage = message == uiState.messages.lastOrNull()
+                        key = { _, it -> it.id }
+                    ) { index, message ->
+                        val isLastMessage = index == uiState.messages.lastIndex
                         val isActivelyStreaming = isLastMessage && uiState.isGenerating && !message.isUser
                         val isReasoning = !message.isUser && run {
                             if (message.modelId != null) {
@@ -392,7 +393,9 @@ fun ChatScreen(
                         )
                     }
 
-                    if (uiState.isGenerating) {
+                    val lastMessage = uiState.messages.lastOrNull()
+                    val isWaitingForFirstToken = uiState.isGenerating && (lastMessage == null || lastMessage.isUser || lastMessage.content.isEmpty())
+                    if (isWaitingForFirstToken) {
                         item {
                             TypingIndicatorBubble()
                         }
@@ -853,21 +856,44 @@ fun ChatScreen(
     }
 }
 
+@Immutable
 data class ParsedMessageContent(
     val thinkContent: String?,
     val hasUnclosedThink: Boolean,
     val mainContent: String
 )
 
-// TODO: consider incremental parsing from last known offset if this shows up in profiling
+// Single-pass fast path for the predominant single-think-block reasoning model case
 fun parseThinkBlocks(rawContent: String): ParsedMessageContent {
     val thinkStartTag = "<think>"
     val thinkEndTag = "</think>"
 
-    if (!rawContent.contains(thinkStartTag)) {
+    val firstStartIndex = rawContent.indexOf(thinkStartTag)
+    if (firstStartIndex == -1) {
         return ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = rawContent)
     }
 
+    // Fast-path: single think block (covers DeepSeek-R1, QwQ, etc. without list allocations)
+    val secondStartIndex = rawContent.indexOf(thinkStartTag, firstStartIndex + thinkStartTag.length)
+    if (secondStartIndex == -1) {
+        val before = rawContent.substring(0, firstStartIndex).trim()
+        val endIndex = rawContent.indexOf(thinkEndTag, firstStartIndex + thinkStartTag.length)
+        return if (endIndex != -1) {
+            val thinkText = rawContent.substring(firstStartIndex + thinkStartTag.length, endIndex).trim().ifEmpty { null }
+            val after = rawContent.substring(endIndex + thinkEndTag.length).trim()
+            val main = when {
+                before.isEmpty() -> after
+                after.isEmpty() -> before
+                else -> "$before\n\n$after"
+            }
+            ParsedMessageContent(thinkContent = thinkText, hasUnclosedThink = false, mainContent = main)
+        } else {
+            val unclosedThink = rawContent.substring(firstStartIndex + thinkStartTag.length).trim().ifEmpty { null }
+            ParsedMessageContent(thinkContent = unclosedThink, hasUnclosedThink = true, mainContent = before)
+        }
+    }
+
+    // Fallback: multiple interleaved think blocks
     val thinkBlocks = mutableListOf<String>()
     val mainBlocks = mutableListOf<String>()
     var currIndex = 0
@@ -953,7 +979,7 @@ fun ChatBubble(
             elevation = CardDefaults.cardElevation(
                 defaultElevation = if (message.isUser) 1.dp else 2.dp
             ),
-            modifier = Modifier.widthIn(max = 290.dp)
+            modifier = Modifier.widthIn(max = 340.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 if (message.imageUri != null) {

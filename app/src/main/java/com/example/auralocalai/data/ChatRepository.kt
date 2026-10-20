@@ -12,7 +12,7 @@ class ChatRepository(private val storageDir: File) {
 
     private val json = Json {
         ignoreUnknownKeys = true
-        prettyPrint = true
+        prettyPrint = false
     }
 
     val historyFile: File

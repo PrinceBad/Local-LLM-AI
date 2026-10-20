@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai
+package com.example.auralocalai
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -26,8 +26,8 @@ class MainActivity : ComponentActivity() {
 
     enableEdgeToEdge()
     setContent {
-      val uiState by llmViewModel.uiState.collectAsState()
-      AuraLocalAITheme(themeMode = uiState.themeMode) { 
+      val themeMode by llmViewModel.themeMode.collectAsState()
+      AuraLocalAITheme(themeMode = themeMode) { 
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) { 
           MainNavigation(llmViewModel) 
         } 
