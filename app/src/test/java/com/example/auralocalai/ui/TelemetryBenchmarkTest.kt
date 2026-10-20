@@ -93,9 +93,9 @@ class TelemetryBenchmarkTest {
     @Test
     fun testModelPresetCatalogMetadataIntegrity() {
         val presets = ModelPreset.presets
-        assertEquals(6, presets.size)
+        assertEquals(14, presets.size)
 
-        // 1. DeepSeek R1
+        // 1. DeepSeek R1 1.5B
         val deepseek = presets.first { it.id == "deepseek-1.5b" }
         assertEquals("Q8 (8-bit)", deepseek.quantization)
         assertEquals("1.5B", deepseek.parameterCount)
@@ -126,6 +126,73 @@ class TelemetryBenchmarkTest {
         assertEquals("mixed 2/4/8-bit", gemmaE4b.quantization)
         assertEquals("4.0B", gemmaE4b.parameterCount)
         assertEquals("12 GB+ RAM", gemmaE4b.ramRequirement)
+
+        // 7. Gemma 4 E2B Uncensored
+        val gemmaE2bUncensored = presets.first { it.id == "gemma4-e2b-uncensored" }
+        assertEquals("INT4", gemmaE2bUncensored.quantization)
+        assertEquals("2.3B", gemmaE2bUncensored.parameterCount)
+        assertEquals("6 GB+ RAM", gemmaE2bUncensored.ramRequirement)
+
+        // 8. Gemma 4 E4B Abliterated
+        val gemmaE4bAbliterated = presets.first { it.id == "gemma4-e4b-abliterated" }
+        assertEquals("INT4", gemmaE4bAbliterated.quantization)
+        assertEquals("4.0B", gemmaE4bAbliterated.parameterCount)
+        assertEquals("12 GB+ RAM", gemmaE4bAbliterated.ramRequirement)
+
+        // 9. SuperGemma 4 E4B Abliterated
+        val supergemma = presets.first { it.id == "supergemma4-e4b-abliterated" }
+        assertEquals("INT4", supergemma.quantization)
+        assertEquals("4.0B", supergemma.parameterCount)
+        assertEquals("12 GB+ RAM", supergemma.ramRequirement)
+
+        // 10. Gemma 4 E2B Heretic
+        val gemmaHeretic = presets.first { it.id == "gemma4-e2b-heretic" }
+        assertEquals("INT4", gemmaHeretic.quantization)
+        assertEquals("2.3B", gemmaHeretic.parameterCount)
+        assertEquals("6 GB+ RAM", gemmaHeretic.ramRequirement)
+
+        // 11. Qwen 2.5 3B Abliterated
+        val qwen25Abliterated = presets.first { it.id == "qwen2.5-3b-abliterated" }
+        assertEquals("INT4", qwen25Abliterated.quantization)
+        assertEquals("3.0B", qwen25Abliterated.parameterCount)
+        assertEquals("8 GB+ RAM", qwen25Abliterated.ramRequirement)
+
+        // 12. Qwen 3 4B Abliterated
+        val qwen3Abliterated = presets.first { it.id == "qwen3-4b-abliterated" }
+        assertEquals("INT4", qwen3Abliterated.quantization)
+        assertEquals("4.0B", qwen3Abliterated.parameterCount)
+        assertEquals("8 GB+ RAM", qwen3Abliterated.ramRequirement)
+
+        // 13. LFM 2.5 VL 3B Heretic
+        val lfmHeretic = presets.first { it.id == "lfm2.5-3b-heretic" }
+        assertEquals("INT4", lfmHeretic.quantization)
+        assertEquals("3.2B", lfmHeretic.parameterCount)
+        assertEquals("4 GB+ RAM", lfmHeretic.ramRequirement)
+        assertEquals(com.example.auralocalai.data.LlmBackendRestriction.CPU_ONLY, lfmHeretic.backendRestriction)
+
+        // 14. DeepSeek R1 7B
+        val deepseek7b = presets.first { it.id == "deepseek-r1-7b" }
+        assertEquals("INT4 (q4_block32)", deepseek7b.quantization)
+        assertEquals("7.0B", deepseek7b.parameterCount)
+        assertEquals("12 GB+ RAM", deepseek7b.ramRequirement)
+        assertTrue(deepseek7b.isReasoningModel)
+
+        // Catalog integrity assertions across all presets
+        val ids = presets.map { it.id }
+        assertEquals("All preset IDs must be unique", ids.size, ids.toSet().size)
+
+        val fileNames = presets.map { it.fileName }
+        assertEquals("All model file names must be unique", fileNames.size, fileNames.toSet().size)
+
+        for (preset in presets) {
+            assertTrue("Preset ${preset.id} must have non-empty name", preset.name.isNotBlank())
+            assertTrue("Preset ${preset.id} must have valid HTTPS download URL", preset.downloadUrl.startsWith("https://"))
+            assertTrue("Preset ${preset.id} file must end with expected extension", preset.fileName.endsWith(preset.expectedExtension))
+            val ramBytes = com.example.auralocalai.data.ModelSafetyValidator.getMinRequiredRamBytes(preset)
+            assertTrue("Preset ${preset.id} RAM requirement must be parsed successfully", ramBytes > 0)
+            assertNotNull("Preset ${preset.id} must have pinned expectedSha256 checksum", preset.expectedSha256)
+            assertEquals("Preset ${preset.id} SHA-256 must be 64-char hex string", 64, preset.expectedSha256?.length)
+        }
     }
 
     @Test

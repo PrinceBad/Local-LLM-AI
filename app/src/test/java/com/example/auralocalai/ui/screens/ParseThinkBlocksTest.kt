@@ -100,15 +100,19 @@ class ParseThinkBlocksTest {
 
     @Test
     fun testModelPresetReasoningResolution() {
-        // 1. Catalog reasoning model
+        // 1. Catalog reasoning models
         assertTrue(ModelPreset.isReasoningModel("deepseek-1.5b"))
         assertFalse(ModelPreset.isKnownNonReasoningModel("deepseek-1.5b"))
+        assertTrue(ModelPreset.isReasoningModel("deepseek-r1-7b"))
+        assertFalse(ModelPreset.isKnownNonReasoningModel("deepseek-r1-7b"))
 
         // 2. Catalog known non-reasoning models
         assertFalse(ModelPreset.isReasoningModel("qwen2.5-coder-3b"))
         assertTrue(ModelPreset.isKnownNonReasoningModel("qwen2.5-coder-3b"))
         assertFalse(ModelPreset.isReasoningModel("gemma4-e2b"))
         assertTrue(ModelPreset.isKnownNonReasoningModel("gemma4-e2b"))
+        assertFalse(ModelPreset.isReasoningModel("gemma4-e2b-uncensored"))
+        assertTrue(ModelPreset.isKnownNonReasoningModel("gemma4-e2b-uncensored"))
 
         // 3. Custom / unknown reasoning models
         assertTrue(ModelPreset.isReasoningModel("custom-deepseek-r1-7b.litertlm"))
