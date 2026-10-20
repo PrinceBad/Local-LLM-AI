@@ -270,15 +270,32 @@ object ModelSafetyValidator {
         }
 
         // Phase 2: Runtime Memory Pressure Guard (availMem & lowMemory) - evaluated for BOTH GPU and CPU
-        val minRequiredAvailBytes = getMinRequiredAvailableRamBytes(preset, isGpu, modelFile, contextTurns)
-        if (memInfo.lowMemory || memInfo.availMem < minRequiredAvailBytes) {
+        if (memInfo.lowMemory) {
+            val availGb = "%.2f".format(memInfo.availMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
+            return Result.failure(
+                IllegalStateException(
+                    "Low memory condition: System is currently under critical memory pressure (lowMemory=true, ${availGb} GiB free). Please close background apps and try again."
+                )
+            )
+        }
+
+        val minRequiredAvailBytes = if (isGpu) {
+            // For GPU on Unified Memory Architecture (UMA), Android dynamically reclaims clean page cache
+            // during buffer staging. Enforce that available memory accommodates model weights plus
+            // minimum runtime activation headroom rather than double-counting cached weights.
+            val modelSizeBytes = estimateModelSizeBytes(modelFile, preset)
+            maxOf(modelSizeBytes + (MIN_SCRATCH_BUFFER_BYTES / 2), 1024L * 1024L * 1024L)
+        } else {
+            getMinRequiredAvailableRamBytes(preset, isGpu = false, modelFile = modelFile, contextTurns = contextTurns)
+        }
+
+        if (memInfo.availMem < minRequiredAvailBytes) {
             val availGb = "%.2f".format(memInfo.availMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val neededGb = "%.2f".format(minRequiredAvailBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val backendLabel = if (isGpu) "GPU" else "CPU"
-            val gpuContextNote = if (isGpu) " (including GPU buffer staging)" else ""
             return Result.failure(
                 IllegalStateException(
-                    "Low memory condition: Only ${availGb} GiB free RAM available right now (system lowMemory=${memInfo.lowMemory}). Initializing ${preset?.name ?: "model"} on $backendLabel ($contextTurns-turn context) requires at least ${neededGb} GiB free memory (weights + KV cache + activations$gpuContextNote) to avoid being killed by Android. Please close background apps and try again."
+                    "Low memory condition: Only ${availGb} GiB free RAM available right now. Initializing ${preset?.name ?: "model"} on $backendLabel requires at least ${neededGb} GiB free memory to avoid being killed by Android. Please close background apps and try again."
                 )
             )
         }

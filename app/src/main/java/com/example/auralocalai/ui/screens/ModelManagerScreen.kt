@@ -1,4 +1,4 @@
-﻿package com.example.auralocalai.ui.screens
+package com.example.auralocalai.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
@@ -149,7 +149,10 @@ fun ModelManagerScreen(
             }
 
             // Recommended Presets List
-            items(ModelPreset.presets) { preset ->
+            items(
+                items = ModelPreset.presets,
+                key = { it.id }
+            ) { preset ->
                 val isDownloaded = uiState.localModels.contains(preset.fileName)
                 val isActive = uiState.activeModelId == preset.id
                 val isDownloading = uiState.currentDownloadingModelId == preset.id
@@ -192,7 +195,10 @@ fun ModelManagerScreen(
                     )
                 }
 
-                items(customModels) { fileName ->
+                items(
+                    items = customModels,
+                    key = { it }
+                ) { fileName ->
                     val isActive = uiState.activeModelId == fileName
                     val isLoaded = uiState.modelState is ModelState.Loaded && isActive
                     val isLoading = uiState.modelState is ModelState.Loading && isActive

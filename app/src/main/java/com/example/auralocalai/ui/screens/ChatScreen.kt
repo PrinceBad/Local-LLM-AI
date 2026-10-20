@@ -237,7 +237,13 @@ fun ChatScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         val subtitleText = when (val state = uiState.modelState) {
-                            is ModelState.Loaded -> state.modelName.replace("(Alibaba)", "").trim()
+                            is ModelState.Loaded -> {
+                                val baseName = state.modelName.replace("(Alibaba)", "").trim()
+                                val backendTag = if (uiState.activeBackend.isNotBlank() && uiState.activeBackend != "None") {
+                                    " • ${uiState.activeBackend}"
+                                } else ""
+                                "$baseName$backendTag"
+                            }
                             ModelState.Loading -> "Loading Model..."
                             is ModelState.Error -> "Engine Error"
                             ModelState.Unloaded -> "No model loaded (Offline)"
@@ -353,7 +359,10 @@ fun ChatScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(uiState.messages) { message ->
+                    items(
+                        items = uiState.messages,
+                        key = { it.id }
+                    ) { message ->
                         val isLastMessage = message == uiState.messages.lastOrNull()
                         val isActivelyStreaming = isLastMessage && uiState.isGenerating && !message.isUser
                         val isReasoning = !message.isUser && run {
@@ -591,42 +600,12 @@ fun ChatScreen(
                                     }
                                 }
 
-                                // Glowing pulsing offline Mic Voice Input button
-                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                                val pulseScale by infiniteTransition.animateFloat(
-                                    initialValue = 1.0f,
-                                    targetValue = 1.3f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(1000, easing = FastOutSlowInEasing),
-                                        repeatMode = RepeatMode.Reverse
-                                    ),
-                                    label = "pulseScale"
-                                )
-                                val pulseAlpha by infiniteTransition.animateFloat(
-                                    initialValue = 0.6f,
-                                    targetValue = 0f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(1000, easing = FastOutSlowInEasing),
-                                        repeatMode = RepeatMode.Reverse
-                                    ),
-                                    label = "pulseAlpha"
-                                )
-
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier.size(36.dp)
                                 ) {
                                     if (isListening) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .graphicsLayer {
-                                                    scaleX = pulseScale
-                                                    scaleY = pulseScale
-                                                    alpha = pulseAlpha
-                                                }
-                                                .background(Color(0xFFEF4444), shape = CircleShape)
-                                        )
+                                        PulsingListeningIndicator()
                                     }
                                     IconButton(
                                         onClick = { toggleListening() },
@@ -1342,4 +1321,38 @@ fun EmptyStateOnboarding(
         }
     }
 }
+}
+
+@Composable
+private fun PulsingListeningIndicator() {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .graphicsLayer {
+                scaleX = pulseScale
+                scaleY = pulseScale
+                alpha = pulseAlpha
+            }
+            .background(Color(0xFFEF4444), shape = CircleShape)
+    )
 }

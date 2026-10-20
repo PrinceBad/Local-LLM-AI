@@ -122,6 +122,18 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     private val chatRepository = ChatRepository(application.filesDir)
     private val tokenStorage: TokenStorage = TokenStorageCoordinator.create(application.applicationContext)
+    private val storageDir: File = File(
+        application.getExternalFilesDir(null) ?: application.filesDir,
+        "models"
+    ).apply { mkdirs() }
+    private val downloader = ModelDownloader()
+    private val inferenceEngine = LlmInferenceEngine(application.applicationContext)
+    private val _uiState = MutableStateFlow(UiState())
+    val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    private var downloadJob: Job? = null
+    private var loadModelJob: Job? = null
+    private var inferenceJob: Job? = null
 
     private fun saveMessages(messages: List<ChatMessage>) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -193,71 +205,48 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
-    private val _uiState = MutableStateFlow(UiState())
-
-    init {
-        // Load chat history & Token off the main thread to avoid disk I/O on the main thread during init
-        viewModelScope.launch(Dispatchers.IO) {
-            val history = chatRepository.loadMessages()
-            val token = tokenStorage.getToken()
-            val degraded = !tokenStorage.isHardwareEncrypted
-            val benchmarks = loadBenchmarksFromPrefs()
-            _uiState.update { it.copy(messages = history, hfToken = token, isKeystoreDegraded = degraded, modelLoadBenchmarks = benchmarks) }
-
-            // Sweep incomplete or corrupted artifacts asynchronously on Dispatchers.IO (prevents cold-start ANRs)
-            ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(storageDir)
-        }
-    }
-    val uiState: StateFlow<UiState> = _uiState.asStateFlow()
-
-    private val downloader = ModelDownloader()
-    private val inferenceEngine = LlmInferenceEngine(application.applicationContext)
-    
-    private val storageDir: File by lazy {
-        val dir = application.getExternalFilesDir(null) ?: application.filesDir
-        File(dir, "models").apply { mkdirs() }
-    }
-
-    private var downloadJob: Job? = null
-    private var loadModelJob: Job? = null
-    private var inferenceJob: Job? = null
-
     private fun migrateExistingModels() {
         val targetDir = storageDir
-        
-        // 1. Migrate from old direct external files dir
-        val oldExternalDir = getApplication<Application>().getExternalFilesDir(null)
-        if (oldExternalDir != null && oldExternalDir.exists() && oldExternalDir != targetDir) {
-            val files = oldExternalDir.listFiles() ?: emptyArray()
-            for (file in files) {
-                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin") || file.name.endsWith(".litertlm"))) {
-                    val destFile = File(targetDir, file.name)
-                    try {
-                        if (!destFile.exists()) {
-                            file.copyTo(destFile, overwrite = true)
-                        }
-                        file.delete()
-                    } catch (e: Exception) {
-                        // Silently ignore
-                    }
-                }
-            }
-        }
+        val oldDirs = listOfNotNull(
+            getApplication<Application>().getExternalFilesDir(null),
+            getApplication<Application>().filesDir,
+            getApplication<Application>().cacheDir
+        )
 
-        // 2. Migrate from old internal files dir
-        val oldInternalDir = getApplication<Application>().filesDir
-        if (oldInternalDir.exists() && oldInternalDir != targetDir) {
-            val files = oldInternalDir.listFiles() ?: emptyArray()
-            for (file in files) {
-                if (file.isFile && (file.name.endsWith(".task") || file.name.endsWith(".bin") || file.name.endsWith(".litertlm"))) {
-                    val destFile = File(targetDir, file.name)
-                    try {
-                        if (!destFile.exists()) {
-                            file.copyTo(destFile, overwrite = true)
-                        }
+        for (oldDir in oldDirs) {
+            if (oldDir.exists() && oldDir.canonicalPath != targetDir.canonicalPath) {
+                val files = oldDir.listFiles() ?: continue
+                for (file in files) {
+                    if (!file.isFile) continue
+                    val name = file.name.lowercase()
+
+                    // Purge orphaned temporary downloads from old directory
+                    if (name.endsWith(".tmp") || name.endsWith(".part") || name.endsWith(".migrating") || file.length() == 0L) {
                         file.delete()
-                    } catch (e: Exception) {
-                        // Silently ignore
+                        continue
+                    }
+
+                    // Migrate recognized model artifacts
+                    if (name.endsWith(".task") || name.endsWith(".bin") || name.endsWith(".litertlm")) {
+                        val destFile = File(targetDir, file.name)
+                        try {
+                            if (!destFile.exists()) {
+                                val moved = file.renameTo(destFile)
+                                if (!moved) {
+                                    val tempDest = File(targetDir, "${file.name}.migrating")
+                                    file.copyTo(tempDest, overwrite = true)
+                                    if (tempDest.renameTo(destFile)) {
+                                        file.delete()
+                                    } else {
+                                        tempDest.delete()
+                                    }
+                                }
+                            } else {
+                                file.delete()
+                            }
+                        } catch (e: Exception) {
+                            Log.w("LlmViewModel", "Could not migrate ${file.name}: ${e.message}")
+                        }
                     }
                 }
             }
@@ -265,10 +254,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        migrateExistingModels()
-        refreshDownloadedModels()
-
-        // Initialize hfToken, contextWindowSize, systemPrompt, and preferredBackend from SharedPreferences
+        // Initialize preferences on main thread (fast synchronous read)
         val prefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         val initialHfToken = prefs.getString("hf_token", "") ?: ""
         val initialContextWindow = prefs.getInt("context_window_size", 6)
@@ -284,6 +270,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             ) 
         }
 
+        // Listen for foreground service download updates
         viewModelScope.launch {
             ModelDownloadService.downloadState.collect { state ->
                 when (state) {
@@ -325,27 +312,43 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        
-        // Auto-load the first available downloaded model (skip on emulators/x86 to prevent error popups on startup)
-        val isEmulator = Build.FINGERPRINT.startsWith("generic")
-                || Build.FINGERPRINT.startsWith("unknown")
-                || Build.MODEL.contains("google_sdk")
-                || Build.MODEL.contains("Emulator")
-                || Build.MODEL.contains("Android SDK built for x86")
-                || Build.HARDWARE.contains("goldfish")
-                || Build.HARDWARE.contains("ranchu")
-                || Build.MANUFACTURER.contains("Genymotion")
-                || Build.PRODUCT.contains("sdk_google")
-                || Build.PRODUCT.contains("google_sdk")
-                || Build.PRODUCT.contains("sdk")
-                || Build.PRODUCT.contains("sdk_x86")
-                || Build.PRODUCT.contains("vbox86p")
-                || Build.PRODUCT.contains("emulator")
-                || Build.PRODUCT.contains("simulator")
-                || Build.SUPPORTED_ABIS.any { it.contains("x86") }
 
-        if (!isEmulator) {
-            viewModelScope.launch {
+        // Asynchronously load chat history, migrate models, sweep corrupted artifacts, refresh local models, and auto-load
+        viewModelScope.launch(Dispatchers.IO) {
+            val history = chatRepository.loadMessages()
+            val token = tokenStorage.getToken()
+            val degraded = !tokenStorage.isHardwareEncrypted
+            val benchmarks = loadBenchmarksFromPrefs()
+            _uiState.update { it.copy(messages = history, hfToken = token, isKeystoreDegraded = degraded, modelLoadBenchmarks = benchmarks) }
+
+            // 1. Migrate any models from old storage directories safely
+            migrateExistingModels()
+
+            // 2. Sweep incomplete or corrupted artifacts asynchronously on Dispatchers.IO (prevents cold-start ANRs)
+            ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(storageDir)
+
+            // 3. Refresh downloaded model list
+            refreshDownloadedModels()
+
+            // 4. Auto-load the first available downloaded model (skip on emulators/x86 to prevent error popups on startup)
+            val isEmulator = Build.FINGERPRINT.startsWith("generic")
+                    || Build.FINGERPRINT.startsWith("unknown")
+                    || Build.MODEL.contains("google_sdk")
+                    || Build.MODEL.contains("Emulator")
+                    || Build.MODEL.contains("Android SDK built for x86")
+                    || Build.HARDWARE.contains("goldfish")
+                    || Build.HARDWARE.contains("ranchu")
+                    || Build.MANUFACTURER.contains("Genymotion")
+                    || Build.PRODUCT.contains("sdk_google")
+                    || Build.PRODUCT.contains("google_sdk")
+                    || Build.PRODUCT.contains("sdk")
+                    || Build.PRODUCT.contains("sdk_x86")
+                    || Build.PRODUCT.contains("vbox86p")
+                    || Build.PRODUCT.contains("emulator")
+                    || Build.PRODUCT.contains("simulator")
+                    || Build.SUPPORTED_ABIS.any { it.contains("x86") }
+
+            if (!isEmulator) {
                 val firstDownloaded = uiState.value.localModels.firstOrNull()
                 if (firstDownloaded != null) {
                     val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == firstDownloaded }
