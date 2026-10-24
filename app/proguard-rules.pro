@@ -39,3 +39,13 @@
 -keepnames class com.example.auralocalai.ui.ChatMessage { *; }
 -keepnames class com.example.auralocalai.ui.InferenceTelemetry { *; }
 -keepnames class com.example.auralocalai.ui.SearchSource { *; }
+
+# Google ML Kit Text Recognition and Vision
+-keep class com.google.mlkit.** { *; }
+-keep interface com.google.mlkit.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
+-keep interface com.google.android.gms.tasks.** { *; }
+-keep class com.google.android.gms.common.** { *; }
+-keep class com.google.android.gms.dynamite.** { *; }
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.**
