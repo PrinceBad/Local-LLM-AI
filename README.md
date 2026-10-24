@@ -26,9 +26,9 @@ Additionally, this application executes all calculations offline. No internet co
 
 ## What Is Local LLM/AI?
 
-Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **MediaPipe Tasks GenAI** engine, the app compiles and runs lightweight LLMs (like Qwen 2.5, DeepSeek-R1, Phi-2, and Gemma 2B) natively on mobile hardware. 
+Local LLM/AI is a high-fidelity, modern Android client designed to provide a completely private, offline, and secure conversational AI experience. By integrating Google's optimized **AI Edge LiteRT-LM** engine, the app compiles and runs lightweight LLMs (like Qwen 3, DeepSeek-R1, Qwen 2.5 Coder, and Gemma 4) natively on mobile hardware.
 
-The app targets GPU acceleration (Vulkan) for responsive streaming generation with graceful CPU fallback.
+The app targets a 3-tier execution waterfall: Qualcomm Hexagon NPU (Snapdragon 8 Gen 1-4 / Elite via QNN HTP) → Vulkan GPU → targeted big-core CPU threads for responsive streaming generation.
 
 The app wraps this powerful local engine in a premium, fluid Jetpack Compose (Material 3) user interface featuring offline OCR document parsing, video/file media integration, and background download handling.
 
@@ -55,31 +55,33 @@ The app includes built-in presets for several highly-capable, lightweight models
 
 ## Features
 
-| Inference | Multimodal & OCR (100% Offline) |
+| Inference & Performance | Multimodal & OCR (100% Offline) |
 | --- | --- |
-| High-performance offline LLM execution | Attach Images, Videos & Documents (PDF, Code, Text) |
-| Vulkan GPU acceleration with graceful CPU fallback | Offline image OCR text extraction using Google ML Kit |
-| Stop Generation button during active streaming | Offline page-by-page PDF rendering and text recognition |
-| Streaming word-by-word responses | Playback attached videos natively and view documents via Intent |
+| 3-Tier Execution Waterfall (Qualcomm Hexagon NPU → Vulkan GPU → Big-Core CPU) | Attach Images, Videos & Documents (PDF, Code, Text) |
+| Universal Thinking Budget Clamping & Dynamic Toggle for Reasoning Models | Offline image OCR text extraction using Google ML Kit |
+| Live Hardware Telemetry Pill (Time to First Token in ms, Tokens/Sec Decode Speed) | Offline page-by-page PDF rendering with auto bitmap recycling |
+| Streaming word-by-word token generation with responsive Stop control | Video keyframe sampling via MediaMetadataRetriever for Vision LLMs |
 
-| UI / Experience | Core Features |
+| UI & Workflow | Privacy & Architecture |
 | --- | --- |
-| Premium Material 3 dynamic styling | Complete offline privacy (no logs or tracking) |
-| Settings Slider for Context Window (4-12 turns) | Large model memory size & RAM badges in-app |
-| Custom system instructions prompt & personas | Chat History Persistence (saves to `chat_history.json`) |
-| Interactive file attachments preview drawer | Export/Share Chat transcript via native Android share sheet |
-| Gated model downloads with Hugging Face Token | Model package integrity check (ZIP/Flatbuffer verification) |
-| Delete confirmation warning dialog | 100% Dark Mode cohesive compliance |
+| Premium Material 3 dynamic styling with high-contrast Dark Mode | 100% on-device execution (no telemetry, ads, or data collection) |
+| Interactive Collapsible Reasoning Accordion for DeepSeek & Qwen `<think>` traces | Privacy-preserving Web Search Grounding with strict query isolation |
+| Multi-Session Chat Manager with auto-titling, rename, and swipe deletion | Background download service with PARTIAL_WAKE_LOCK and HTTP 206 resume |
+| Settings sliders for context window, temperature, top-k, top-p, and penalty | Hardware-backed AES-256 Keystore encryption with auto-recovery |
+| Type-safe model catalog filtering chips (Turbo, Reasoning, Vision, Compact) | Full post-download SHA-256 verification and atomic file moves |
 
-### Recent UI/UX & Quality-of-Life Optimizations (v1.2+)
-- **Hugging Face Authentication**: Added dedicated settings screen to securely input, validate, and save your Hugging Face Access Token with automatic S3 redirect auth-header handling.
-- **Configurable Context Window**: Added settings slider (4 to 12 turns) to dynamically limit history, saving RAM and improving response speed.
-- **System Prompt Guidelines**: Enabled customizing system instructions to guide local AI personas.
-- **Post-Download Validation**: Introduced structural file validation after downloads complete to avoid native crashes on corrupted model files.
-- **Consolidated Top Header**: Reduced vertical height to 56.dp, center-aligned settings and delete icons, added system status bar padding, and cleaned up loaded model titles.
-- **Refined Chat Bubbles**: Applied uniform 16.dp corner radius with a sharp 4.dp anchor corner on the sender's edge, expanded text margins, and integrated high-contrast borders for light and dark themes.
-- **Sleek Input & Attachments**: Replaced individual file buttons with a single "+" dropdown trigger, introduced a compact text input area using custom BasicTextField, and implemented state-based styling for the send controls.
-- **Seamless Keyboard Handling**: Redesigned layout flow to use sequential vertical Column with .imePadding(), automatically shifting the input bar and triggering auto-scroll to the bottom upon soft keyboard popups without leaving blank gaps.
+### Recent Architecture, UI/UX & Quality-of-Life Innovations (v2.5+)
+
+- **DeepSeek & Qwen Reasoning Accordion**: Real-time collapsible reasoning accordion parsing `<think>` and `</think>` tags with live unclosed streaming token support. Reasoning traces are rendered cleanly and automatically stripped from replayed history so intermediate thoughts never exhaust future context windows.
+- **Universal Thinking Budget & Control**: Dynamic per-turn thinking toggle in chat and settings, defaulted to off for Qwen 3 models (`qwen3-0.6b`, `1.7b`, `4b`) to prevent 2K/4K window exhaustion, and an automated universal budget clamp `minOf(1024, detectedMaxContextTokens / 3)` for all reasoning bundles.
+- **Qualcomm Hexagon NPU & GPU Waterfall**: Multi-tier execution engine prioritizing NPU (Snapdragon 8 Gen 1–4 / Elite via Qualcomm QNN HTP) → Vulkan GPU → targeted big-core CPU threads. Automatically caches NPU subgraph incompatibility in persistent storage (`npu_backend_cache`) to prevent UI freezes.
+- **Live Hardware Telemetry Pill**: Real-time performance badge beneath assistant messages displaying exact Time to First Token (TTFT in ms), token decode rate (tokens/sec), prompt token count, and total decode tokens.
+- **Background Download Service with WakeLock**: Dedicated foreground download service (`dataSync`) protected by a reference-counted `PARTIAL_WAKE_LOCK` with a 2-hour safety timeout, ensuring Android Doze mode never suspends network sockets during multi-gigabyte downloads. Features seek-based HTTP 206 resumption with `RandomAccessFile`, live transfer speed, ETA, and post-download SHA-256 verification.
+- **Privacy-Preserving Web Search Grounding**: Optional search grounding supporting DuckDuckGo, Wikipedia, Jina AI, Brave Search, and Serper. Strict query isolation ensures only the concise search query leaves the device; conversation history and system instructions remain 100% on-device. Features expandable source citation cards with full query transparency.
+- **Multimodal Video & Document Vision**: Comprehensive vision pipeline supporting downsampled image OCR, multi-page PDF rendering via `PdfRenderer` with immediate bitmap memory recycling, and video keyframe extraction via `MediaMetadataRetriever` for vision-capable models (Gemma 4 E4B).
+- **Multi-Session Chat Manager**: Full multi-chat management featuring isolated session files (`sessions/{id}.json`), automatic session titling derived from initial prompts, rename, session deletion, and conversation switching with clean state restoration.
+- **Hardware-Backed Keystore Security**: AES-256 encrypted token and API key storage via AndroidX Security Crypto with automatic degraded fallback and version/patch-based re-probe recovery.
+- **Pervasive Native Resource Cleanup**: All native ML Kit `TextRecognizer` instances, `PdfRenderer` descriptors, and `Bitmap` allocations are wrapped in strict `try-finally` lifecycle guards to eliminate memory leaks and avoid native aborts.
 
 ---
 
@@ -122,7 +124,7 @@ Local LLM/AI is built on top of state-of-the-art on-device intelligence librarie
 
 Special thanks to:
 
-- [Google MediaPipe Tasks GenAI](https://github.com/google-ai-edge/mediapipe)
+- [Google AI Edge LiteRT (LiteRT-LM)](https://github.com/google-ai-edge/litert-lm)
 - [Google ML Kit Text Recognition](https://developers.google.com/ml-kit/vision/text-recognition)
 - [Jetpack Compose & Material 3](https://developer.android.com/compose)
 - [Coil Image Loading Library](https://github.com/coil-kt/coil)
