@@ -529,7 +529,10 @@ fun ChatScreen(
                         Spacer(modifier = Modifier.height(2.dp))
                         val (statusColor, subtitleText) = when (val state = uiState.modelState) {
                             is ModelState.Loaded -> {
-                                val baseName = state.modelName.replace("(Alibaba)", "").trim()
+                                val baseName = state.modelName
+                                    .replace(Regex("\\s*\\(.*\\)"), "")
+                                    .replace("(Alibaba)", "")
+                                    .trim()
                                 val backendTag = if (uiState.activeBackend.isNotBlank() && uiState.activeBackend != "None") {
                                     " • ${uiState.activeBackend}"
                                 } else ""
