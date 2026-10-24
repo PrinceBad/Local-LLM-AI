@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.ByteArrayOutputStream
 
@@ -36,6 +39,7 @@ class LlmInferenceEngine(private val context: Context) {
     private var initialHistory: List<Message> = emptyList()
     private var samplerConfig: SamplerConfig? = null
     private var thinkingConfig: ThinkingConfig? = null
+    private val inferenceMutex = Mutex()
     private val failedNpuModelPaths = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     /** Real maximum context window size detected dynamically from ModelInfo. */
@@ -228,8 +232,12 @@ class LlmInferenceEngine(private val context: Context) {
             // STEP 2: Attempt GPU initialization (Vulkan)
             // ============================================================
             if (!loaded) {
-                val attemptGpu = (preferredBackend == "AUTO" || preferredBackend == "GPU_ONLY") &&
+                val isLowTierGpu = SocDetector.shouldDefaultToCpu(context)
+                val attemptGpu = (preferredBackend == "GPU_ONLY" || (preferredBackend == "AUTO" && !isLowTierGpu)) &&
                     (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.GPU_ONLY)
+                if (preferredBackend == "AUTO" && isLowTierGpu) {
+                    android.util.Log.i("LlmInferenceEngine", "Entry-level GPU detected (e.g. Snapdragon 685 / Adreno 610). In AUTO mode, bypassing 75s GPU shader compilation to use high-performance CPU (XNNPACK) directly.")
+                }
                 if (attemptGpu) {
                     // Pre-flight GPU RAM guard: accounts for weight staging & Android Vulkan buffer duplication (LiteRT-LM #3507)
                     val gpuRamCheck = ModelSafetyValidator.verifyDeviceRamForInference(
@@ -407,24 +415,26 @@ class LlmInferenceEngine(private val context: Context) {
         initialHistory: List<Message> = this.initialHistory,
         samplerConfig: SamplerConfig? = this.samplerConfig,
         thinkingConfig: ThinkingConfig? = this.thinkingConfig
-    ): Boolean {
-        val activeEngine = engine ?: return false
-        this.systemPrompt = systemPrompt
-        this.initialHistory = initialHistory
-        this.samplerConfig = samplerConfig
-        this.thinkingConfig = thinkingConfig
-        try {
-            conversation?.close()
-        } catch (e: Exception) {
-            android.util.Log.w("LlmInferenceEngine", "Failed to close previous conversation", e)
-        }
-        conversation = null
-        return try {
-            conversation = newConversation(activeEngine)
-            true
-        } catch (e: Exception) {
-            android.util.Log.e("LlmInferenceEngine", "Failed to reset conversation", e)
-            false
+    ): Boolean = runBlocking {
+        inferenceMutex.withLock {
+            val activeEngine = engine ?: return@withLock false
+            this@LlmInferenceEngine.systemPrompt = systemPrompt
+            this@LlmInferenceEngine.initialHistory = initialHistory
+            this@LlmInferenceEngine.samplerConfig = samplerConfig
+            this@LlmInferenceEngine.thinkingConfig = thinkingConfig
+            try {
+                conversation?.close()
+            } catch (e: Exception) {
+                android.util.Log.w("LlmInferenceEngine", "Failed to close previous conversation", e)
+            }
+            conversation = null
+            return@withLock try {
+                conversation = newConversation(activeEngine)
+                true
+            } catch (e: Exception) {
+                android.util.Log.e("LlmInferenceEngine", "Failed to reset conversation", e)
+                false
+            }
         }
     }
 
@@ -438,17 +448,29 @@ class LlmInferenceEngine(private val context: Context) {
         repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
         turnThinkingConfig: ThinkingConfig? = null
     ): Flow<String> = callbackFlow {
-        val currentConversation = conversation
-        if (currentConversation == null) {
-            close(Exception("Model not loaded yet. Please load a model first."))
-            return@callbackFlow
-        }
-
         // Multimodal memory pre-flight guard: ensure headroom for vision tower & image patch embeddings
         if (image != null) {
             val multimodalRamCheck = ModelSafetyValidator.verifyAvailableRamForMultimodal(context)
             if (multimodalRamCheck.isFailure) {
                 close(multimodalRamCheck.exceptionOrNull() ?: Exception("Insufficient available memory for vision processing"))
+                return@callbackFlow
+            }
+        }
+
+        val activeEngine = engine
+        if (activeEngine == null) {
+            close(Exception("Model not loaded yet. Please load a model first."))
+            return@callbackFlow
+        }
+
+        // Auto-initialize conversation if not already created
+        var currentConversation = conversation
+        if (currentConversation == null) {
+            try {
+                currentConversation = newConversation(activeEngine)
+                conversation = currentConversation
+            } catch (initConvEx: Throwable) {
+                close(Exception("Failed to initialize conversation: ${initConvEx.message}", initConvEx))
                 return@callbackFlow
             }
         }
@@ -486,18 +508,39 @@ class LlmInferenceEngine(private val context: Context) {
             } else {
                 null
             }
-            currentConversation.sendMessageAsync(
-                message = message,
-                repetitionPenaltyConfig = repetitionPenaltyConfig,
-                thinkingConfig = effectiveThinkingConfig
-            )
-                .flowOn(Dispatchers.Default)
-                .collect { chunk ->
-                    val text = chunk.toString()
-                    if (text.isNotEmpty()) {
-                        trySend(text)
+
+            suspend fun runTurn(conv: Conversation) {
+                conv.sendMessageAsync(
+                    message = message,
+                    repetitionPenaltyConfig = repetitionPenaltyConfig,
+                    thinkingConfig = effectiveThinkingConfig
+                )
+                    .flowOn(Dispatchers.Default)
+                    .collect { chunk ->
+                        val text = chunk.toString()
+                        if (text.isNotEmpty()) {
+                            trySend(text)
+                        }
                     }
+            }
+
+            try {
+                runTurn(currentConversation)
+            } catch (convEx: Throwable) {
+                val msg = convEx.message.orEmpty()
+                val isDead = convEx is IllegalStateException ||
+                    msg.contains("not alive", ignoreCase = true) ||
+                    msg.contains("is closed", ignoreCase = true)
+                if (isDead && engine != null) {
+                    android.util.Log.w("LlmInferenceEngine", "Native conversation not alive; auto-recovering with fresh conversation context.")
+                    try { currentConversation.close() } catch (_: Throwable) {}
+                    val freshConv = newConversation(engine!!)
+                    conversation = freshConv
+                    runTurn(freshConv)
+                } else {
+                    throw convEx
                 }
+            }
             channel.close()
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -506,30 +549,32 @@ class LlmInferenceEngine(private val context: Context) {
         }
 
         awaitClose {
-            // Cleanup on close
+            // Flow cancelled or closed
         }
     }.flowOn(Dispatchers.IO)
 
     /**
      * Frees resources by closing the active LLM inference instance.
      */
-    fun close() {
-        try {
-            conversation?.close()
-        } catch (e: Exception) {
-            // Ignore
-        } finally {
-            conversation = null
-        }
+    fun close() = runBlocking {
+        inferenceMutex.withLock {
+            try {
+                conversation?.close()
+            } catch (e: Exception) {
+                // Ignore
+            } finally {
+                conversation = null
+            }
 
-        try {
-            engine?.close()
-        } catch (e: Exception) {
-            // Ignore
-        } finally {
-            engine = null
-            currentModelPath = null
-            activeBackend = "None"
+            try {
+                engine?.close()
+            } catch (e: Exception) {
+                // Ignore
+            } finally {
+                engine = null
+                currentModelPath = null
+                activeBackend = "None"
+            }
         }
     }
 

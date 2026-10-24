@@ -45,7 +45,9 @@ object SocDetector {
         val rawSocModel = getRawSocModel()
         val hardware = Build.HARDWARE.orEmpty().uppercase()
         val board = Build.BOARD.orEmpty().uppercase()
-        val combined = "$rawSocModel|$hardware|$board"
+        val device = Build.DEVICE.orEmpty().uppercase()
+        val product = Build.PRODUCT.orEmpty().uppercase()
+        val combined = "$rawSocModel|$hardware|$board|$device|$product"
 
         val (vendor, marketingName, htp) = classifySoc(rawSocModel, hardware, board, combined)
         val isNpuHardware = vendor == SocVendor.QUALCOMM && htp != HtpVersion.UNKNOWN
@@ -172,6 +174,19 @@ object SocDetector {
             socModel.contains("SM7325") || combined.contains("SM7325") || combined.contains("YUKON") ->
                 Pair("Snapdragon 778G (SM7325)", HtpVersion.V68)
 
+            // Snapdragon 685 / 680 (SM6225 / Bengal / Onyx / Khaje)
+            socModel.contains("SM6225") || combined.contains("SM6225") || combined.contains("BENGAL") ||
+                combined.contains("ONYX") || combined.contains("KHAJE") || combined.contains("KHATI") ->
+                Pair("Snapdragon 685 / 680 (SM6225)", HtpVersion.UNKNOWN)
+
+            // Snapdragon 695 / 690 (SM6375 / Holi)
+            socModel.contains("SM6375") || combined.contains("SM6375") || combined.contains("HOLI") ->
+                Pair("Snapdragon 695 5G (SM6375)", HtpVersion.UNKNOWN)
+
+            // Snapdragon 480 / 480+ (SM4350)
+            socModel.contains("SM4350") || combined.contains("SM4350") ->
+                Pair("Snapdragon 480 (SM4350)", HtpVersion.UNKNOWN)
+
             // Snapdragon X Elite / Plus
             combined.contains("SC8380") || combined.contains("HAMOA") ->
                 Pair("Snapdragon X Elite", HtpVersion.V75)
@@ -258,5 +273,38 @@ object SocDetector {
         } catch (e: Exception) {
             Pair(false, "Failed to verify QNN runtime: ${e.localizedMessage}")
         }
+    }
+
+    /**
+     * Determines whether the active hardware has an entry-level GPU (e.g. Adreno 610/612/616,
+     * Mali-G52/G57, Snapdragon 680/685/695, Helio G series).
+     * On these GPUs, Vulkan shader compilation is extremely slow (often taking 60-90s,
+     * hanging the app and triggering system ANR dialogs) and native GPU drivers
+     * frequently encounter out-of-memory or driver crashes.
+     * In AUTO mode, routing directly to CPU (XNNPACK) delivers instant startup, 100% stability,
+     * and rock-solid responsiveness.
+     */
+    fun shouldDefaultToCpu(context: Context): Boolean {
+        val info = detectSoc(context)
+        val combined = "${info.socModel} ${info.marketingName} ${Build.HARDWARE} ${Build.BOARD} ${Build.DEVICE} ${Build.PRODUCT}".uppercase()
+
+        if (combined.contains("SM6225") || combined.contains("685") || combined.contains("680") ||
+            combined.contains("SM6375") || combined.contains("695") || combined.contains("SM4350") ||
+            combined.contains("480") || combined.contains("662") || combined.contains("665") ||
+            combined.contains("BENGAL") || combined.contains("ONYX") || combined.contains("KHAJE") ||
+            combined.contains("HOLI")
+        ) {
+            return true
+        }
+
+        if (combined.contains("G80") || combined.contains("G85") || combined.contains("G88") ||
+            combined.contains("G90") || combined.contains("G95") || combined.contains("G96") ||
+            combined.contains("G99") || combined.contains("MT6769") || combined.contains("MT6785") ||
+            combined.contains("MT6789")
+        ) {
+            return true
+        }
+
+        return false
     }
 }
