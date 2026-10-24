@@ -20,3 +20,4 @@ local.properties
 /jdk/
 /models/
 test.kt
+.vscode/

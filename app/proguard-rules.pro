@@ -18,3 +18,24 @@
 
 # Keep ModelPreset classes so reflection (like Gson) works if needed
 -keep class com.example.auralocalai.data.ModelPreset { *; }
+# Keep Kotlinx Serialization
+-keepattributes *Annotation*,InnerClasses,EnclosingMethod
+-keepclassmembers class * {
+    @kotlinx.serialization.Serializable <fields>;
+}
+-keepclassmembers class * {
+    @kotlinx.serialization.Serializable <methods>;
+}
+-keepclasseswithmembers class * {
+    @kotlinx.serialization.Serializable <init>(...);
+}
+-keepclassmembers class * implements kotlinx.serialization.KSerializer {
+    *;
+}
+-keepclassmembers class * {
+    *** Companion;
+}
+-keepnames class com.example.auralocalai.data.ChatSession { *; }
+-keepnames class com.example.auralocalai.ui.ChatMessage { *; }
+-keepnames class com.example.auralocalai.ui.InferenceTelemetry { *; }
+-keepnames class com.example.auralocalai.ui.SearchSource { *; }

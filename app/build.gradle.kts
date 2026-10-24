@@ -102,8 +102,11 @@ dependencies {
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 
-  // Google AI Edge LiteRT for local LLM inference
-  implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
+  // Google AI Edge LiteRT for local LLM inference.
+  // 0.18.x is required by current .litertlm bundles (litert-community ships
+  // "needs LiteRT-LM 0.18.0 or newer" artifacts) and adds the chat-template
+  // metadata handling plus ConversationConfig.chatTemplate / ModelInfo.
+  implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
 
   // AndroidX Security Crypto for hardware-backed EncryptedSharedPreferences
   implementation("androidx.security:security-crypto:1.1.0-alpha06")
