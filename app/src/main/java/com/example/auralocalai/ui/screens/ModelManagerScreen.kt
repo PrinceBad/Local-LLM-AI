@@ -1,5 +1,13 @@
 package com.example.auralocalai.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import com.example.auralocalai.theme.DarkSuccess
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -34,7 +42,20 @@ import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.Add
 import com.example.auralocalai.data.ModelPreset
+import com.example.auralocalai.data.ModelSpeedTier
+import com.example.auralocalai.data.ModelTag
 import java.util.Locale
+
+
+enum class ModelPresetCategory(val label: String) {
+    ALL("All"),
+    TURBO("⚡ Turbo"),
+    REASONING("🧠 Reasoning"),
+    VISION("👁️ Vision"),
+    COMPACT("4GB RAM"),
+    UNCENSORED("Uncensored"),
+    CODING("💻 Coding")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +80,20 @@ fun ModelManagerScreen(
             }
         }
     }
-    var modelToDelete by remember { mutableStateOf<ModelPreset?>(null) }
+        var modelToDelete by remember { mutableStateOf<ModelPreset?>(null) }
+    var selectedCategory by remember { mutableStateOf(ModelPresetCategory.ALL) }
+
+    val filteredPresets = remember(selectedCategory) {
+        when (selectedCategory) {
+            ModelPresetCategory.ALL -> ModelPreset.presets
+            ModelPresetCategory.TURBO -> ModelPreset.presets.filter { it.speedTier == ModelSpeedTier.TURBO || it.tags.contains(ModelTag.TURBO) }
+            ModelPresetCategory.REASONING -> ModelPreset.presets.filter { it.tags.contains(ModelTag.REASONING) || it.isReasoningModel }
+            ModelPresetCategory.VISION -> ModelPreset.presets.filter { it.supportsVision || it.tags.contains(ModelTag.VISION) }
+            ModelPresetCategory.COMPACT -> ModelPreset.presets.filter { it.minRamGb <= 4 }
+            ModelPresetCategory.UNCENSORED -> ModelPreset.presets.filter { it.tags.contains(ModelTag.UNCENSORED) }
+            ModelPresetCategory.CODING -> ModelPreset.presets.filter { it.tags.contains(ModelTag.CODING) }
+        }
+    }
  
     Scaffold(
         topBar = {
@@ -137,20 +171,44 @@ fun ModelManagerScreen(
                 }
             }
 
-            // Presets Header
+            // Presets Header & Category Chips
             item {
-                Text(
-                    text = "Recommended Mobile Presets",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
+                Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text(
+                        text = "Recommended Mobile Presets",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ModelPresetCategory.values().forEach { cat ->
+                            val isSelected = selectedCategory == cat
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedCategory = cat },
+                                label = { Text(cat.label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium) },
+                                shape = RoundedCornerShape(18.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
             }
 
-            // Recommended Presets List
+            // Recommended Presets List (Filtered)
             items(
-                items = ModelPreset.presets,
+                items = filteredPresets,
                 key = { it.id }
             ) { preset ->
                 val isDownloaded = uiState.localModels.contains(preset.fileName)
@@ -173,6 +231,7 @@ fun ModelManagerScreen(
                     benchmark = benchmark,
                     onDownload = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
+                    onOpenChat = onBack,
                     onCancelLoad = { viewModel.cancelLoading() },
                     onCancel = { viewModel.cancelDownload() },
                     onDelete = { modelToDelete = preset }
@@ -233,7 +292,7 @@ fun ModelManagerScreen(
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 OutlinedButton(
-                                    onClick = { modelToDelete = ModelPreset(id = fileName, name = fileName, description = "Sideloaded offline model file.", sizeLabel = "Unknown size", ramRequirement = "Unknown RAM", downloadUrl = "", fileName = fileName, requiresHfToken = false, expectedExtension = "", backendRestriction = LlmBackendRestriction.ANY) },
+                                    onClick = { modelToDelete = ModelPreset(id = fileName, name = fileName, description = "Sideloaded offline model file.", sizeBytes = 0L, minRamGb = 4, downloadUrl = "", fileName = fileName, requiresHfToken = false, expectedExtension = "", backendRestriction = LlmBackendRestriction.ANY) },
                                     shape = RoundedCornerShape(18.dp),
                                     modifier = Modifier.height(36.dp),
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
@@ -273,7 +332,7 @@ fun ModelManagerScreen(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surface
                     ),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     shape = RoundedCornerShape(20.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
@@ -389,6 +448,7 @@ fun PresetModelCard(
     benchmark: com.example.auralocalai.ui.ModelLoadBenchmark? = null,
     onDownload: () -> Unit,
     onLoad: () -> Unit,
+    onOpenChat: () -> Unit,
     onCancelLoad: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit
@@ -438,7 +498,8 @@ fun PresetModelCard(
                             )
                         }
 
-                        // RAM requirement Pill tag
+                        // RAM requirement Pill tag (clean without duplicate RAM:)
+                        val cleanRam = preset.ramRequirement.replace("RAM:", "").trim()
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
@@ -446,7 +507,7 @@ fun PresetModelCard(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "RAM: ${preset.ramRequirement}",
+                                text = "RAM: $cleanRam",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -482,6 +543,7 @@ fun PresetModelCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+
                     }
                 }
 
@@ -608,17 +670,50 @@ fun PresetModelCard(
                 ) {
                     if (isDownloaded) {
                         if (isActive) {
-                            Box(
-                                modifier = Modifier
-                                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Loaded & Ready Offline",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = DarkSuccess.copy(alpha = 0.12f),
+                                    border = BorderStroke(1.dp, DarkSuccess.copy(alpha = 0.35f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(DarkSuccess)
+                                        )
+                                        Text(
+                                            text = "Ready Offline",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DarkSuccess
+                                        )
+                                    }
+                                }
+
+                                Button(
+                                    onClick = onOpenChat,
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ChatBubbleOutline,
+                                        contentDescription = "Open Chat",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Open Chat", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         } else {
                             Row(

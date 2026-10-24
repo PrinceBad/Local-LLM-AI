@@ -1,5 +1,18 @@
 package com.example.auralocalai.ui.screens
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.text.AnnotatedString
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -19,6 +32,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
+import com.example.auralocalai.data.ChatSession
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Close
@@ -78,9 +94,13 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    var showRenameDialog by remember { mutableStateOf<ChatSession?>(null) }
+    var renameTitleInput by remember { mutableStateOf("") }
+    var sessionToDelete by remember { mutableStateOf<ChatSession?>(null) }
     var textInput by remember { mutableStateOf("") }
     val context = LocalContext.current
-    var showAttachmentMenu by remember { mutableStateOf(false) }
+    var showAttachmentSheet by remember { mutableStateOf(false) }
     var showSearchDisclosureDialog by remember { mutableStateOf(false) }
 
     var isListening by remember { mutableStateOf(false) }
@@ -91,23 +111,21 @@ fun ChatScreen(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toString())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
     }
 
-    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            if (isGranted) {
-                isListening = true
-                try {
-                    speechRecognizer?.startListening(speechIntent)
-                } catch (e: Exception) {
-                    isListening = false
-                    Toast.makeText(context, "Error starting voice recognition: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+    // Graceful fallback for devices without background SpeechRecognizer service
+    val speechPromptLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            isListening = false
+            if (result.resultCode == android.app.Activity.RESULT_OK) {
+                val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                if (!matches.isNullOrEmpty()) {
+                    val text = matches[0]
+                    textInput = if (textInput.isBlank()) text else if (textInput.endsWith(" ")) "$textInput$text" else "$textInput $text"
                 }
-            } else {
-                Toast.makeText(context, "Audio recording permission is required for voice input.", Toast.LENGTH_SHORT).show()
             }
         }
     )
@@ -129,8 +147,8 @@ fun ChatScreen(
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
                     SpeechRecognizer.ERROR_NETWORK -> "Network error"
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No match found"
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition engine busy"
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognizer busy"
                     SpeechRecognizer.ERROR_SERVER -> "Server error"
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input"
                     else -> "Voice recognition error"
@@ -140,6 +158,7 @@ fun ChatScreen(
                 }
             }
             override fun onResults(results: Bundle?) {
+                isListening = false
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
                     val text = matches[0]
@@ -150,6 +169,45 @@ fun ChatScreen(
             override fun onEvent(eventType: Int, params: Bundle?) {}
         }
     }
+
+    fun startListeningInternal() {
+        if (speechRecognizer == null && SpeechRecognizer.isRecognitionAvailable(context)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(speechListener)
+            }
+        }
+
+        if (speechRecognizer != null) {
+            try {
+                isListening = true
+                speechRecognizer?.startListening(speechIntent)
+            } catch (e: Exception) {
+                isListening = false
+                try {
+                    speechPromptLauncher.launch(speechIntent)
+                } catch (dialogEx: Exception) {
+                    Toast.makeText(context, "Voice input unavailable: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            try {
+                speechPromptLauncher.launch(speechIntent)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Speech recognition is not available on this device", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                startListeningInternal()
+            } else {
+                Toast.makeText(context, "Audio recording permission is required for voice input.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
 
     DisposableEffect(context) {
         val recognizer = if (SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -166,7 +224,11 @@ fun ChatScreen(
 
     fun toggleListening() {
         if (isListening) {
-            speechRecognizer?.stopListening()
+            try {
+                speechRecognizer?.stopListening()
+            } catch (e: Exception) {
+                // ignore
+            }
             isListening = false
         } else {
             val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
@@ -175,12 +237,7 @@ fun ChatScreen(
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
             if (hasPermission) {
-                try {
-                    speechRecognizer?.startListening(speechIntent)
-                    isListening = true
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error starting voice recognition: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                }
+                startListeningInternal()
             } else {
                 recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             }
@@ -215,6 +272,222 @@ fun ChatScreen(
         }
     }
 
+    if (showRenameDialog != null) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = null },
+            title = { Text("Rename Chat") },
+            text = {
+                OutlinedTextField(
+                    value = renameTitleInput,
+                    onValueChange = { renameTitleInput = it },
+                    label = { Text("Chat Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val s = showRenameDialog
+                        if (s != null && renameTitleInput.isNotBlank()) {
+                            viewModel.renameSession(s.id, renameTitleInput.trim())
+                        }
+                        showRenameDialog = null
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (sessionToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { sessionToDelete = null },
+            title = { Text("Delete Chat") },
+            text = { Text("Are you sure you want to delete '${sessionToDelete?.title}'? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        sessionToDelete?.let { viewModel.deleteSession(it.id) }
+                        sessionToDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sessionToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(310.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Conversations",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        IconButton(onClick = { coroutineScope.launch { drawerState.close() } }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close Drawer")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.createNewSession()
+                            coroutineScope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("New Chat", fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(
+                            items = uiState.sessions,
+                            key = { it.id }
+                        ) { session ->
+                            val isSelected = session.id == uiState.currentSessionId
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.switchSession(session.id)
+                                        coroutineScope.launch { drawerState.close() }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = session.title,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${session.messageCount} messages",
+                                            fontSize = 11.sp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Row {
+                                        IconButton(
+                                            onClick = {
+                                                renameTitleInput = session.title
+                                                showRenameDialog = session
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = "Rename",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { sessionToDelete = session },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch { drawerState.close() }
+                                onNavigateToModelManager()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text("Models", fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch { drawerState.close() }
+                                onNavigateToSettings()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text("Settings", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    ) {
     Scaffold(
         topBar = {
             Column(
@@ -230,6 +503,18 @@ fun ChatScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    IconButton(
+                        onClick = { coroutineScope.launch { drawerState.open() } },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open Chat Drawer",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.Center
@@ -238,32 +523,53 @@ fun ChatScreen(
                             text = "Local LLM/AI",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.0.sp,
+                            letterSpacing = 0.5.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        val subtitleText = when (val state = uiState.modelState) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val (statusColor, subtitleText) = when (val state = uiState.modelState) {
                             is ModelState.Loaded -> {
                                 val baseName = state.modelName.replace("(Alibaba)", "").trim()
                                 val backendTag = if (uiState.activeBackend.isNotBlank() && uiState.activeBackend != "None") {
                                     " • ${uiState.activeBackend}"
                                 } else ""
-                                "$baseName$backendTag"
+                                Pair(Color(0xFF22C55E), "$baseName$backendTag")
                             }
-                            ModelState.Loading -> "Loading Model..."
-                            is ModelState.Error -> "Engine Error"
-                            ModelState.Unloaded -> "No model loaded (Offline)"
+                            ModelState.Loading -> Pair(Color(0xFFEAB308), "Loading Model...")
+                            is ModelState.Error -> Pair(MaterialTheme.colorScheme.error, "Engine Error")
+                            ModelState.Unloaded -> Pair(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), "No model (Offline)")
                         }
-                        Text(
-                            text = subtitleText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = statusColor.copy(alpha = 0.12f),
+                            modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { onNavigateToModelManager() }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(statusColor)
+                                )
+                                Text(
+                                    text = subtitleText,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = statusColor,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         if (uiState.messages.isNotEmpty()) {
                             IconButton(
@@ -280,48 +586,52 @@ fun ChatScreen(
                                     val shareIntent = Intent.createChooser(sendIntent, "Share Chat History")
                                     context.startActivity(shareIntent)
                                 },
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Share,
                                     contentDescription = "Share Chat",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                             IconButton(
                                 onClick = { viewModel.clearChat() },
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Delete,
                                     contentDescription = "Clear Chat",
-                                    tint = MaterialTheme.colorScheme.error
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
                         IconButton(
-                            onClick = onNavigateToSettings,
-                            modifier = Modifier.size(40.dp)
+                            onClick = onNavigateToModelManager,
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.VpnKey,
-                                contentDescription = "App Settings",
-                                tint = MaterialTheme.colorScheme.primary
+                                imageVector = Icons.Default.Dns,
+                                contentDescription = "Model Catalog",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         IconButton(
-                            onClick = onNavigateToModelManager,
-                            modifier = Modifier.size(40.dp)
+                            onClick = onNavigateToSettings,
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
-                                contentDescription = "Model Settings",
-                                tint = MaterialTheme.colorScheme.primary
+                                contentDescription = "App Settings",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
-                HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), thickness = 1.dp)
             }
         },
         containerColor = MaterialTheme.colorScheme.background,
@@ -446,7 +756,7 @@ fun ChatScreen(
                             .background(MaterialTheme.colorScheme.surface)
                             .border(
                                 width = 1.dp,
-                                color = Color(0xFFE2E8F0),
+                                color = MaterialTheme.colorScheme.outlineVariant,
                                 shape = RoundedCornerShape(24.dp)
                             )
                             .padding(8.dp)
@@ -464,7 +774,7 @@ fun ChatScreen(
                                     modifier = Modifier
                                         .size(64.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFFF1F5F9)),
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (uiState.selectedImageUri != null) {
@@ -545,7 +855,7 @@ fun ChatScreen(
                                 
                                 IconButton(
                                     onClick = {
-                                        viewModel.selectImage(null, context)
+                                        viewModel.clearAttachment()
                                     },
                                     modifier = Modifier.size(32.dp)
                                 ) {
@@ -559,7 +869,7 @@ fun ChatScreen(
                             }
                             
                             HorizontalDivider(
-                                color = Color(0xFFF1F5F9),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                                 thickness = 1.dp,
                                 modifier = Modifier.padding(vertical = 4.dp)
                             )
@@ -571,69 +881,18 @@ fun ChatScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Consolidated "+" attachment button with DropdownMenu
-                                Box {
-                                    IconButton(
-                                        onClick = { showAttachmentMenu = true },
-                                        enabled = !hasAttachment && !uiState.isGenerating,
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Attach Content",
-                                            tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1),
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                    
-                                    DropdownMenu(
-                                        expanded = showAttachmentMenu,
-                                        onDismissRequest = { showAttachmentMenu = false },
-                                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Attach Image") },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.Image,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                imageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Attach Video") },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.PlayCircle,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                videoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Attach Document") },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.Description,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                            },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                fileLauncher.launch("*/*")
-                                            }
-                                        )
-                                    }
+                                // Consolidated "+" attachment button
+                                IconButton(
+                                    onClick = { showAttachmentSheet = true },
+                                    enabled = !hasAttachment && !uiState.isGenerating,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Attach Content",
+                                        tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(24.dp)
+                                    )
                                 }
 
                                 Box(
@@ -807,6 +1066,129 @@ fun ChatScreen(
             }
         }
 
+        if (showAttachmentSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showAttachmentSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle() },
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                        .navigationBarsPadding(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Add to Conversation",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable {
+                                showAttachmentSheet = false
+                                imageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Attach Image", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Text("Visual question answering or OCR text extraction", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable {
+                                showAttachmentSheet = false
+                                videoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.PlayCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Attach Video", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Text("Sample keyframes for video understanding", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable {
+                                showAttachmentSheet = false
+                                fileLauncher.launch("*/*")
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Attach Document", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Text("Extract text from PDF, TXT, or markdown files", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
         if (showSearchDisclosureDialog) {
             AlertDialog(
                 onDismissRequest = { showSearchDisclosureDialog = false },
@@ -854,6 +1236,7 @@ fun ChatScreen(
             )
         }
     }
+}
 }
 
 @Immutable
@@ -956,8 +1339,7 @@ fun ChatBubble(
     val borderStroke = if (message.isUser) {
         BorderStroke(0.dp, Color.Transparent)
     } else {
-        val borderColor = if (isSystemInDarkTheme()) Color(0xFF1E293B) else Color(0xFFCBD5E1)
-        BorderStroke(1.dp, borderColor)
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     }
 
     val textColor = if (message.isUser) {
@@ -1000,7 +1382,7 @@ fun ChatBubble(
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
-                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
@@ -1050,7 +1432,7 @@ fun ChatBubble(
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
-                        border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
@@ -1124,17 +1506,21 @@ fun ChatBubble(
                     Card(
                         shape = RoundedCornerShape(10.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isSystemInDarkTheme()) Color(0xFF1E293B).copy(alpha = 0.6f) else Color(0xFFF1F5F9)
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                         ),
                         border = BorderStroke(
                             1.dp,
-                            if (isSystemInDarkTheme()) Color(0xFF334155) else Color(0xFFE2E8F0)
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                     ) {
-                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .animateContentSize()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1189,11 +1575,11 @@ fun ChatBubble(
                     Card(
                         shape = RoundedCornerShape(10.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isSystemInDarkTheme()) Color(0xFF1E293B).copy(alpha = 0.6f) else Color(0xFFF1F5F9)
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                         ),
                         border = BorderStroke(
                             1.dp,
-                            if (isSystemInDarkTheme()) Color(0xFF334155) else Color(0xFFE2E8F0)
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1231,6 +1617,15 @@ fun ChatBubble(
                             }
 
                             if (isSourcesExpanded) {
+                                if (!message.searchQuery.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "External Query Sent: \"${message.searchQuery}\"",
+                                        fontSize = 11.sp,
+                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     sources.forEachIndexed { index, source ->
@@ -1299,13 +1694,41 @@ fun ChatBubble(
                     }
                 }
                 
+                if (!message.isUser && !isActivelyGenerating && parsed.mainContent.isNotBlank()) {
+                    @Suppress("DEPRECATION")
+                    val clipboardManager = LocalClipboardManager.current
+                    val bubbleContext = LocalContext.current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(parsed.mainContent))
+                                Toast.makeText(bubbleContext, "Copied response to clipboard", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy message",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+
                 if (message.ocrText != null) {
                     Spacer(modifier = Modifier.height(8.dp))
                     var isExpanded by remember { mutableStateOf(false) }
                     Card(
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)),
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
@@ -1373,7 +1796,7 @@ fun TypingIndicatorBubble() {
         Card(
             shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
             modifier = Modifier.padding(vertical = 2.dp)
         ) {
@@ -1395,6 +1818,12 @@ fun TypingIndicatorBubble() {
     }
 }
 
+private data class SamplePromptItem(
+    val prompt: String,
+    val category: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
 @Composable
 fun EmptyStateOnboarding(
     modelState: ModelState,
@@ -1402,6 +1831,7 @@ fun EmptyStateOnboarding(
     onNavigateToModelManager: () -> Unit,
     onQuickPrompt: (String) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1415,20 +1845,28 @@ fun EmptyStateOnboarding(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-        // Glowing tech emblem
+        // Glowing tech emblem with AI sparkle
         Box(
             modifier = Modifier
-                .size(72.dp)
+                .size(76.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), CircleShape),
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.05f),
+                            Color.Transparent
+                        )
+                    )
+                )
+                .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Local LLM Engine",
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = "Local LLM AI Engine",
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(34.dp)
             )
         }
 
@@ -1451,7 +1889,7 @@ fun EmptyStateOnboarding(
             lineHeight = 20.sp,
             modifier = Modifier.padding(horizontal = 12.dp)
         )
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         if (modelState is ModelState.Loaded) {
             Text(
@@ -1462,29 +1900,70 @@ fun EmptyStateOnboarding(
                 modifier = Modifier.align(Alignment.Start).padding(start = 4.dp)
             )
             Spacer(modifier = Modifier.height(10.dp))
-            val samplePrompts = listOf(
-                "Write a quick python code to sort a list.",
-                "Explain dark matter in simple English sentences.",
-                "Give me 3 healthy breakfast ideas under 10 minutes."
+            val sampleItems = listOf(
+                SamplePromptItem("Write a quick python code to sort a list.", "Coding", Icons.Default.Code),
+                SamplePromptItem("Explain dark matter in simple English sentences.", "Physics & Science", Icons.Default.Psychology),
+                SamplePromptItem("Give me 3 healthy breakfast ideas under 10 minutes.", "Lifestyle & Ideas", Icons.Default.Lightbulb)
             )
-            samplePrompts.forEach { prompt ->
+            sampleItems.forEach { item ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 5.dp)
-                        .clickable { onQuickPrompt(prompt) },
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onQuickPrompt(item.prompt)
+                        },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
-                    Text(
-                        text = prompt,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = item.icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.category,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = item.prompt,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium,
+                                lineHeight = 18.sp
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         } else if (modelState is ModelState.Error) {

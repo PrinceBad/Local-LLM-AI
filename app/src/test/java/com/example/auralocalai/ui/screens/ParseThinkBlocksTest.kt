@@ -99,6 +99,21 @@ class ParseThinkBlocksTest {
     }
 
     @Test
+    fun testStripThinkingBlocks_ForEngineHistory() {
+        val rawClosed = "<think>Let me analyze this problem step by step.\nThinking complete.</think>Here is the solution to your question."
+        assertEquals("Here is the solution to your question.", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(rawClosed))
+
+        val rawUnclosed = "<think>Still working on analyzing..."
+        assertEquals("", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(rawUnclosed))
+
+        val rawInterleaved = "<think>Initial thought</think>Middle answer.<think>Second thought</think>Final answer."
+        assertEquals("Middle answer.Final answer.", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(rawInterleaved))
+
+        val noThink = "Simple prompt without any reasoning tags."
+        assertEquals("Simple prompt without any reasoning tags.", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(noThink))
+    }
+
+    @Test
     fun testModelPresetReasoningResolution() {
         // 1. Catalog reasoning models
         assertTrue(ModelPreset.isReasoningModel("deepseek-1.5b"))
@@ -107,8 +122,8 @@ class ParseThinkBlocksTest {
         assertFalse(ModelPreset.isKnownNonReasoningModel("deepseek-r1-7b"))
 
         // 2. Catalog known non-reasoning models
-        assertFalse(ModelPreset.isReasoningModel("qwen2.5-coder-3b"))
-        assertTrue(ModelPreset.isKnownNonReasoningModel("qwen2.5-coder-3b"))
+        assertFalse(ModelPreset.isReasoningModel("qwen2.5-coder-1.5b"))
+        assertTrue(ModelPreset.isKnownNonReasoningModel("qwen2.5-coder-1.5b"))
         assertFalse(ModelPreset.isReasoningModel("gemma4-e2b"))
         assertTrue(ModelPreset.isKnownNonReasoningModel("gemma4-e2b"))
         assertFalse(ModelPreset.isReasoningModel("gemma4-e2b-uncensored"))

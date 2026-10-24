@@ -25,6 +25,7 @@ import com.example.auralocalai.data.SearchContextBuilder
 import com.example.auralocalai.data.SearchIntentDetector
 import com.example.auralocalai.data.SearchIntentResult
 import com.example.auralocalai.data.SearchOutcome
+import com.example.auralocalai.data.ChatSession
 import com.example.auralocalai.data.SearchSource
 import com.example.auralocalai.data.WebSearchClient
 import com.example.auralocalai.data.WebSearchMode
@@ -35,6 +36,10 @@ import com.example.auralocalai.data.ServiceDownloadState
 import com.example.auralocalai.data.SocInfo
 import com.example.auralocalai.data.isValidModelFile
 import com.example.auralocalai.theme.ThemeMode
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.RepetitionPenaltyConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -92,7 +97,8 @@ data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
     val telemetry: InferenceTelemetry? = null,
     val modelId: String? = null,
-    val searchSources: List<SearchSource>? = null
+    val searchSources: List<SearchSource>? = null,
+    val searchQuery: String? = null
 )
 
 const val DEFAULT_SYSTEM_PROMPT = "You are Local LLM/AI, a helpful, intelligent offline AI running locally on this mobile device. Keep your responses concise and precise."
@@ -142,7 +148,18 @@ data class UiState(
     val activeSearchQuery: String? = null,
     val searchDisclosureAcknowledged: Boolean = false,
     val chatSearchOverride: WebSearchMode? = null,
-    val webSearchError: String? = null
+    val webSearchError: String? = null,
+    val temperature: Float = 0.7f,
+    val topP: Float = 0.9f,
+    val topK: Int = 40,
+    val repetitionPenalty: Float = 1.1f,
+    val enableThinking: Boolean = true,
+    val thinkingTokenBudget: Int = -1,
+    val detectedMaxContextTokens: Int = 0,
+    val detectedSupportsThinking: Boolean = false,
+    val detectedSupportsVision: Boolean = false,
+    val sessions: List<ChatSession> = emptyList(),
+    val currentSessionId: String? = null
 )
 
 class LlmViewModel(application: Application) : AndroidViewModel(application) {
@@ -173,8 +190,11 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     private var inferenceJob: Job? = null
 
     private fun saveMessages(messages: List<ChatMessage>) {
+        val activeId = _uiState.value.currentSessionId ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            chatRepository.saveMessages(messages)
+            chatRepository.saveSessionMessages(activeId, messages)
+            val updatedSessions = chatRepository.loadSessions()
+            _uiState.update { it.copy(sessions = updatedSessions) }
         }
     }
 
@@ -302,6 +322,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val initialSearchProvider = prefs.getString("web_search_provider", "free") ?: "free"
         val initialMaxResults = prefs.getInt("web_search_max_results", 5)
         val initialDisclosure = prefs.getBoolean("web_search_disclosure_acknowledged", false)
+        val initialTemperature = prefs.getFloat("sampler_temperature", 0.7f)
+        val initialTopP = prefs.getFloat("sampler_top_p", 0.9f)
+        val initialTopK = prefs.getInt("sampler_top_k", 40)
+        val initialRepetitionPenalty = prefs.getFloat("sampler_repetition_penalty", 1.1f)
+        val initialEnableThinking = prefs.getBoolean("sampler_enable_thinking", true)
+        val initialThinkingBudget = prefs.getInt("sampler_thinking_budget", -1)
+
         _uiState.update { 
             it.copy(
                 hfToken = initialHfToken,
@@ -312,7 +339,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 webSearchMode = initialSearchMode,
                 webSearchProviderId = initialSearchProvider,
                 webSearchMaxResults = initialMaxResults,
-                searchDisclosureAcknowledged = initialDisclosure
+                searchDisclosureAcknowledged = initialDisclosure,
+                temperature = initialTemperature,
+                topP = initialTopP,
+                topK = initialTopK,
+                repetitionPenalty = initialRepetitionPenalty,
+                enableThinking = initialEnableThinking,
+                thinkingTokenBudget = initialThinkingBudget
             ) 
         }
 
@@ -359,15 +392,24 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Asynchronously load chat history, migrate models, sweep corrupted artifacts, refresh local models, and auto-load
+        // Asynchronously load chat sessions & history, migrate models, sweep corrupted artifacts, refresh local models, and auto-load
         viewModelScope.launch(Dispatchers.IO) {
-            val history = chatRepository.loadMessages()
+            val sessionsList = chatRepository.loadSessions()
+            val activeSession = if (sessionsList.isNotEmpty()) {
+                sessionsList.first()
+            } else {
+                chatRepository.createSession(title = "New Chat")
+            }
+            val history = chatRepository.loadSessionMessages(activeSession.id)
+            val allSessions = chatRepository.loadSessions()
             val token = tokenStorage.getToken()
             val degraded = !tokenStorage.isHardwareEncrypted
             val benchmarks = loadBenchmarksFromPrefs()
             val searchKey = tokenStorage.getSecret(SecretStorage.KEY_SEARCH_API_KEY)
             _uiState.update {
                 it.copy(
+                    sessions = allSessions,
+                    currentSessionId = activeSession.id,
                     messages = history,
                     hfToken = token,
                     isKeystoreDegraded = degraded,
@@ -404,46 +446,11 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     || Build.SUPPORTED_ABIS.any { it.contains("x86") }
 
             if (!isEmulator) {
-                val firstDownloaded = uiState.value.localModels.firstOrNull()
+                val firstDownloaded = _uiState.value.localModels.firstOrNull()
                 if (firstDownloaded != null) {
                     val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == firstDownloaded }
-                    val modelName = matchingPreset?.name ?: firstDownloaded
                     val modelId = matchingPreset?.id ?: firstDownloaded
-                    
-                    _uiState.update { it.copy(modelState = ModelState.Loading, loadingModelId = modelId, loadingStage = "Validating model file...") }
-                    val startNs = System.nanoTime()
-                    val result = inferenceEngine.loadModel(
-                        modelPath = File(storageDir, firstDownloaded).absolutePath,
-                        preferredBackend = initialPreferredBackend,
-                        contextTurns = initialContextWindow,
-                        onStageUpdate = { stage ->
-                            _uiState.update { it.copy(loadingStage = stage) }
-                        }
-                    )
-                    val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
-                    if (result.isSuccess) {
-                        recordModelLoadBenchmark(modelId, elapsedMs)
-                        _uiState.update { 
-                            it.copy(
-                                modelState = ModelState.Loaded(modelName),
-                                activeModelId = modelId,
-                                loadingModelId = null,
-                                activeBackend = inferenceEngine.activeBackend,
-                                lastNpuError = inferenceEngine.lastNpuError?.let { err ->
-                                    val sw = java.io.StringWriter()
-                                    err.printStackTrace(java.io.PrintWriter(sw))
-                                    sw.toString()
-                                },
-                                loadingStage = null
-                            )
-                        }
-                    } else {
-                        _uiState.update { it.copy(modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)), activeBackend = "None", loadingModelId = null, lastNpuError = inferenceEngine.lastNpuError?.let { err ->
-                                    val sw = java.io.StringWriter()
-                                    err.printStackTrace(java.io.PrintWriter(sw))
-                                    sw.toString()
-                                }, loadingStage = null) }
-                    }
+                    loadModel(firstDownloaded, modelId)
                 }
             }
         }
@@ -622,6 +629,73 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         prefs.edit().putString("system_prompt", prompt).apply()
         _uiState.update { it.copy(systemPrompt = prompt) }
+
+        // The system instruction is bound to the conversation when it is created,
+        // so the conversation has to be rebuilt for the new prompt to apply.
+        if (inferenceEngine.isModelLoaded && !_uiState.value.isGenerating) {
+            viewModelScope.launch(Dispatchers.IO) {
+                inferenceEngine.resetConversation(
+                    systemPrompt = prompt,
+                    initialHistory = buildEngineHistory()
+                )
+            }
+        }
+    }
+
+    /**
+     * Updates model inference and sampling parameters.
+     * Recreates conversation state with the new sampler settings if a model is active.
+     */
+    fun updateSamplerSettings(
+        temperature: Float = _uiState.value.temperature,
+        topP: Float = _uiState.value.topP,
+        topK: Int = _uiState.value.topK,
+        repetitionPenalty: Float = _uiState.value.repetitionPenalty,
+        enableThinking: Boolean = _uiState.value.enableThinking,
+        thinkingBudget: Int = _uiState.value.thinkingTokenBudget
+    ) {
+        val context = getApplication<Application>().applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putFloat("sampler_temperature", temperature)
+            .putFloat("sampler_top_p", topP)
+            .putInt("sampler_top_k", topK)
+            .putFloat("sampler_repetition_penalty", repetitionPenalty)
+            .putBoolean("sampler_enable_thinking", enableThinking)
+            .putInt("sampler_thinking_budget", thinkingBudget)
+            .apply()
+
+        _uiState.update {
+            it.copy(
+                temperature = temperature,
+                topP = topP,
+                topK = topK,
+                repetitionPenalty = repetitionPenalty,
+                enableThinking = enableThinking,
+                thinkingTokenBudget = thinkingBudget
+            )
+        }
+
+        if (inferenceEngine.isModelLoaded && !_uiState.value.isGenerating) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val sampler = SamplerConfig(
+                    topK = topK,
+                    topP = topP.toDouble(),
+                    temperature = temperature.toDouble(),
+                    seed = 0
+                )
+                val thinking = ThinkingConfig(
+                    enableThinking = enableThinking,
+                    thinkingTokenBudget = thinkingBudget
+                )
+                inferenceEngine.resetConversation(
+                    systemPrompt = _uiState.value.systemPrompt,
+                    initialHistory = buildEngineHistory(),
+                    samplerConfig = sampler,
+                    thinkingConfig = thinking
+                )
+            }
+        }
     }
 
     fun setPreferredBackend(backend: String) {
@@ -734,6 +808,16 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Maps raw engine exceptions to clear, actionable messages for end users.
      */
+    fun stripThinkingBlocks(rawContent: String): String = Companion.stripThinkingBlocks(rawContent)
+
+    companion object {
+        fun stripThinkingBlocks(rawContent: String): String {
+            return rawContent
+                .replace(Regex("""<think>[\s\S]*?(</think>|\Z)""", RegexOption.IGNORE_CASE), "")
+                .trim()
+        }
+    }
+
     private fun friendlyErrorMessage(raw: String?): String {
         if (raw.isNullOrBlank()) return "An unknown error occurred while loading the model. Please try again."
 
@@ -778,6 +862,59 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Maps the persisted chat into native engine turns so the model keeps its
+     * own context instead of receiving a flattened transcript. The newest turns
+     * win when the bundle's KV cache cannot hold the whole conversation.
+     */
+    /**
+     * Maps the persisted chat into native engine turns with sliding-window budgeting.
+     * To maximize effective context window and preserve KV cache for user dialog,
+     * chain-of-thought `<think>` tags are stripped from previous assistant responses.
+     */
+    fun buildEngineHistory(): List<Message> {
+        val preset = ModelPreset.findByIdOrFileName(_uiState.value.activeModelId)
+        val rawContextLimit = inferenceEngine.detectedMaxContextTokens.takeIf { it > 0 }
+            ?: (preset?.effectiveContextTokens ?: ModelPreset.DEFAULT_CONTEXT_TOKENS)
+        // Reserve 25% of context limit for system instruction, user turn & generation headroom
+        val budgetTokens = (rawContextLimit * 3) / 4
+        val candidates = mutableListOf<ChatMessage>()
+        var used = 0
+        var rawTokensEstimated = 0
+
+        for (msg in _uiState.value.messages.asReversed()) {
+            if (msg.content.isBlank()) continue
+            val contentToSend = if (!msg.isUser) {
+                stripThinkingBlocks(msg.content)
+            } else {
+                msg.content
+            }
+            if (contentToSend.isBlank()) continue
+
+            rawTokensEstimated += estimatePromptTokens(msg.content)
+            val cost = estimatePromptTokens(contentToSend)
+            if (used + cost > budgetTokens) break
+            used += cost
+            candidates.add(msg.copy(content = contentToSend))
+        }
+
+        candidates.reverse()
+
+        // Drop any leading assistant message so history strictly starts with a user turn
+        while (candidates.isNotEmpty() && !candidates.first().isUser) {
+            candidates.removeAt(0)
+        }
+
+        val mapped = candidates.map { msg ->
+            if (msg.isUser) Message.user(msg.content) else Message.model(msg.content)
+        }
+
+        if (rawTokensEstimated > used) {
+            Log.d("LlmViewModel", "Thinking-strip context savings: $rawTokensEstimated tokens reduced to $used tokens in history")
+        }
+        return mapped
+    }
+
     fun loadModel(fileName: String, modelId: String) {
         loadModelJob?.cancel()
         loadModelJob = viewModelScope.launch {
@@ -786,10 +923,26 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val displayName = matchingPreset?.name ?: fileName
 
             val startNs = System.nanoTime()
+            val sampler = SamplerConfig(
+                topK = _uiState.value.topK,
+                topP = _uiState.value.topP.toDouble(),
+                temperature = _uiState.value.temperature.toDouble(),
+                seed = 0
+            )
+            val modelDefaultThinking = matchingPreset?.defaultThinkingEnabled ?: false
+            val thinking = ThinkingConfig(
+                enableThinking = if (matchingPreset != null) modelDefaultThinking else _uiState.value.enableThinking,
+                thinkingTokenBudget = _uiState.value.thinkingTokenBudget
+            )
+
             val result = inferenceEngine.loadModel(
                 modelPath = File(storageDir, fileName).absolutePath,
                 preferredBackend = _uiState.value.preferredBackend,
                 contextTurns = _uiState.value.contextWindowSize,
+                systemPrompt = _uiState.value.systemPrompt,
+                initialHistory = buildEngineHistory(),
+                samplerConfig = sampler,
+                thinkingConfig = thinking,
                 onStageUpdate = { stage ->
                     _uiState.update { it.copy(loadingStage = stage) }
                 }
@@ -797,6 +950,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
             if (result.isSuccess) {
                 recordModelLoadBenchmark(modelId, elapsedMs)
+                val supportsThinking = inferenceEngine.detectedSupportsThinking
                 _uiState.update { 
                     it.copy(
                         modelState = ModelState.Loaded(displayName),
@@ -808,7 +962,11 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                             err.printStackTrace(java.io.PrintWriter(sw))
                             sw.toString()
                         },
-                        loadingStage = null
+                        loadingStage = null,
+                        detectedMaxContextTokens = inferenceEngine.detectedMaxContextTokens,
+                        detectedSupportsThinking = supportsThinking,
+                        detectedSupportsVision = inferenceEngine.detectedSupportsVision,
+                        enableThinking = if (supportsThinking) (matchingPreset?.defaultThinkingEnabled ?: it.enableThinking) else false
                     )
                 }
             } else {
@@ -826,6 +984,21 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+        }
+    }
+
+    fun clearAttachment() {
+        _uiState.update { 
+            it.copy(
+                selectedImageUri = null,
+                selectedVideoUri = null,
+                selectedFileUri = null,
+                selectedFileName = null,
+                selectedFileType = null,
+                extractedOcrText = null,
+                isAttachmentProcessing = false,
+                attachmentError = null
+            )
         }
     }
 
@@ -856,9 +1029,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             try {
                 val image = InputImage.fromFilePath(context, uri)
-                val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
                 val task = recognizer.process(image)
                 val visionText = task.awaitTask()
                 
@@ -874,6 +1047,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         attachmentError = "OCR Failed: ${e.localizedMessage}",
                         isAttachmentProcessing = false
                     )
+                }
+            } finally {
+                try {
+                    recognizer.close()
+                } catch (ce: Exception) {
+                    Log.w("LlmViewModel", "Error closing image recognizer: ${ce.message}")
                 }
             }
         }
@@ -954,33 +1133,56 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                     val pdfRenderer = PdfRenderer(pfd)
-                    val pageCount = pdfRenderer.pageCount
-                    val combinedText = StringBuilder()
-                    val maxPages = minOf(pageCount, 3)
                     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                    try {
+                        val pageCount = pdfRenderer.pageCount
+                        val combinedText = StringBuilder()
+                        val maxPages = minOf(pageCount, 3)
 
-                    for (i in 0 until maxPages) {
-                        val page = pdfRenderer.openPage(i)
-                        val width = page.width / 2
-                        val height = page.height / 2
-                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                        val canvas = Canvas(bitmap)
-                        canvas.drawColor(Color.WHITE)
-                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        for (i in 0 until maxPages) {
+                            val page = pdfRenderer.openPage(i)
+                            try {
+                                val width = page.width / 2
+                                val height = page.height / 2
+                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                try {
+                                    val canvas = Canvas(bitmap)
+                                    canvas.drawColor(Color.WHITE)
+                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
 
-                        val image = InputImage.fromBitmap(bitmap, 0)
-                        val visionText = recognizer.process(image).awaitTask()
-                        combinedText.append(visionText.text).append("\n")
-                        page.close()
-                    }
-                    pdfRenderer.close()
-                    pfd.close()
+                                    val image = InputImage.fromBitmap(bitmap, 0)
+                                    val visionText = recognizer.process(image).awaitTask()
+                                    combinedText.append(visionText.text).append("\n")
+                                } finally {
+                                    bitmap.recycle()
+                                }
+                            } finally {
+                                page.close()
+                            }
+                        }
 
-                    _uiState.update { 
-                        it.copy(
-                            extractedOcrText = combinedText.toString(),
-                            isAttachmentProcessing = false
-                        )
+                        _uiState.update { 
+                            it.copy(
+                                extractedOcrText = combinedText.toString(),
+                                isAttachmentProcessing = false
+                            )
+                        }
+                    } finally {
+                        try {
+                            recognizer.close()
+                        } catch (ce: Exception) {
+                            Log.w("LlmViewModel", "Error closing PDF recognizer: ${ce.message}")
+                        }
+                        try {
+                            pdfRenderer.close()
+                        } catch (pe: Exception) {
+                            Log.w("LlmViewModel", "Error closing PdfRenderer: ${pe.message}")
+                        }
+                        try {
+                            pfd.close()
+                        } catch (fe: Exception) {
+                            Log.w("LlmViewModel", "Error closing pfd: ${fe.message}")
+                        }
                     }
                 } else {
                     val text = context.contentResolver.openInputStream(uri)?.use { 
@@ -1094,11 +1296,25 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
         saveMessages(currentMessages)
 
+        // Dynamic auto-titling: Automatically title 'New Chat' sessions from the first meaningful prompt
+        val currentActiveId = _uiState.value.currentSessionId
+        val currentSession = _uiState.value.sessions.firstOrNull { it.id == currentActiveId }
+        if (currentSession != null && (currentSession.title == "New Chat" || currentSession.title.isBlank())) {
+            val candidate = messageText.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: "Chat"
+            val cleanTitle = if (candidate.length > 28) candidate.take(28).trimEnd() + "..." else candidate
+            renameSession(currentSession.id, cleanTitle)
+        }
+
         inferenceJob = viewModelScope.launch {
             val activeModel = _uiState.value.activeModelId
             val activePreset = ModelPreset.findByIdOrFileName(activeModel)
-            val contextCapacity = activePreset?.contextLength?.replace(Regex("[^0-9]"), "")?.toIntOrNull() ?: 4096
-            val charBudget = SearchContextBuilder.resolveCharBudget(contextCapacity)
+            val contextCapacity = activePreset?.effectiveContextTokens ?: ModelPreset.DEFAULT_CONTEXT_TOKENS
+            // Keep the injected web context proportional to the bundle's real
+            // KV cache so search results cannot crowd out the conversation.
+            val charBudget = minOf(
+                SearchContextBuilder.resolveCharBudget(contextCapacity),
+                (contextCapacity * 3 / 4).coerceAtLeast(600)
+            )
 
             val effectiveMode = _uiState.value.chatSearchOverride ?: _uiState.value.webSearchMode
             if (_uiState.value.chatSearchOverride != null) {
@@ -1172,55 +1388,42 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val hasSearchContext = searchBlock.isNotBlank()
-            val systemInstruction = if (hasSearchContext) {
-                "${uiState.value.systemPrompt}\n\n${SearchContextBuilder.SYSTEM_SEARCH_INSTRUCTION}"
-            } else {
-                uiState.value.systemPrompt
-            }
-            val systemHeader = "System: $systemInstruction\n\n"
 
-            // Exclude current message from history to position search context defensively
-            val historyTurnBudget = if (hasSearchContext) {
-                (uiState.value.contextWindowSize - 2).coerceAtLeast(2)
-            } else {
-                uiState.value.contextWindowSize
-            }
-
-            val previousHistoryList = currentMessages.dropLast(1).takeLast(historyTurnBudget)
-            val history = if (previousHistoryList.isNotEmpty()) {
-                previousHistoryList.joinToString("\n") { msg ->
-                    if (msg.isUser) {
-                        val prefix = when {
-                            msg.ocrText != null && activeModel != "gemma4-e2b" && activeModel != "gemma4-e4b" -> "[Extracted Text from Attachment: ${msg.ocrText}]\n"
-                            else -> ""
-                        }
-                        "User: $prefix${msg.content}"
-                    } else {
-                        "AI: ${msg.content}"
-                    }
-                } + "\n\n"
-            } else {
-                ""
-            }
-
+            // The system instruction lives in the engine's native system slot
+            // (bound when the conversation is created), so it is NOT repeated
+            // inside the user turn. Only the per-turn payload is sent, which
+            // keeps the prompt inside the model's training distribution.
             val currentPrefix = when {
-                ocrText != null && activeModel != "gemma4-e2b" && activeModel != "gemma4-e4b" -> "[Extracted Text from Attachment: ${ocrText}]\n"
+                ocrText != null && activeModel?.contains("gemma", ignoreCase = true) != true -> "[Extracted Text from Attachment: $ocrText]\n"
                 else -> ""
             }
-            val currentUserTurn = "User: $currentPrefix$messageText"
 
-            val searchPart = if (searchBlock.isNotBlank()) "$searchBlock\n\n" else ""
-            val fullPrompt = "$systemHeader$history$searchPart$currentUserTurn\nAI: "
+            val turnParts = mutableListOf<String>()
+            if (hasSearchContext) {
+                turnParts += SearchContextBuilder.SYSTEM_SEARCH_INSTRUCTION
+                turnParts += searchBlock
+            }
+            if (currentPrefix.isNotBlank()) {
+                turnParts += currentPrefix.trimEnd()
+            }
+            turnParts += messageText
+            val currentTurn = turnParts.joinToString("\n\n")
 
-            // Extract downsampled bitmap natively if a vision-capable model is loaded and image is attached
-            val imageBitmap: Bitmap? = if (imageUri != null && (activeModel == "gemma4-e2b" || activeModel == "gemma4-e4b")) {
-                val context = getApplication<Application>().applicationContext
-                decodeSampledBitmap(context, Uri.parse(imageUri), maxDimension = 1024)
-            } else {
-                null
+            // Extract downsampled bitmap natively if a vision-capable model is loaded (from image or video keyframe)
+            val supportsVision = activePreset?.supportsVision
+                ?: (activeModel?.contains("gemma", ignoreCase = true) == true)
+            val context = getApplication<Application>().applicationContext
+            val imageBitmap: Bitmap? = when {
+                imageUri != null && supportsVision -> {
+                    decodeSampledBitmap(context, Uri.parse(imageUri), maxDimension = 1024)
+                }
+                videoUri != null && supportsVision -> {
+                    extractVideoKeyframe(context, Uri.parse(videoUri), maxDimension = 1024)
+                }
+                else -> null
             }
 
-            val promptTokens = estimatePromptTokens(fullPrompt, hasImage = (imageBitmap != null))
+            val promptTokens = estimatePromptTokens(currentTurn, hasImage = (imageBitmap != null))
             val t0 = System.nanoTime()
             var tFirst: Long? = null
             var tokenCount = 0
@@ -1234,11 +1437,24 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     content = "",
                     isUser = false,
                     modelId = activeModel,
-                    searchSources = sourcesToAttach
+                    searchSources = sourcesToAttach,
+                    searchQuery = searchOutcome?.query
                 )
                 _uiState.update { it.copy(messages = currentMessages + aiMessagePlaceholder) }
 
-                inferenceEngine.generateResponse(fullPrompt, imageBitmap)
+                val repetitionConfig = RepetitionPenaltyConfig(
+                    repetitionPenalty = _uiState.value.repetitionPenalty
+                )
+                val turnThinkingConfig = ThinkingConfig(
+                    enableThinking = _uiState.value.enableThinking,
+                    thinkingTokenBudget = _uiState.value.thinkingTokenBudget
+                )
+                inferenceEngine.generateResponse(
+                    prompt = currentTurn,
+                    image = imageBitmap,
+                    repetitionPenaltyConfig = repetitionConfig,
+                    turnThinkingConfig = turnThinkingConfig
+                )
                     .onCompletion { cause ->
                         if (cause is kotlinx.coroutines.CancellationException) {
                             wasCancelled = true
@@ -1302,13 +1518,167 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(
                             content = finalContent,
                             telemetry = telemetry,
-                            searchSources = sourcesToAttach
+                            searchSources = sourcesToAttach,
+                            searchQuery = searchOutcome?.query
                         )
                     }
                     state.copy(messages = updatedMessages, isGenerating = false, isSearching = false, activeSearchQuery = null)
                 }
                 saveMessages(_uiState.value.messages)
             }
+        }
+    }
+
+    /**
+     * Creates a new chat session, switches to it, and clears conversation state.
+     */
+    fun createNewSession(title: String = "New Chat") {
+        inferenceJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            val newSession = chatRepository.createSession(
+                title = title,
+                modelId = _uiState.value.activeModelId
+            )
+            val updatedSessions = chatRepository.loadSessions()
+            _uiState.update {
+                it.copy(
+                    sessions = updatedSessions,
+                    currentSessionId = newSession.id,
+                    messages = emptyList(),
+                    isGenerating = false,
+                    selectedImageUri = null,
+                    selectedVideoUri = null,
+                    selectedFileUri = null,
+                    selectedFileName = null,
+                    selectedFileType = null,
+                    extractedOcrText = null
+                )
+            }
+            if (inferenceEngine.isModelLoaded) {
+                inferenceEngine.resetConversation(
+                    systemPrompt = _uiState.value.systemPrompt,
+                    initialHistory = emptyList()
+                )
+            }
+        }
+    }
+
+    /**
+     * Switches to an existing chat session and rebuilds the model conversation context.
+     */
+    fun switchSession(sessionId: String) {
+        if (_uiState.value.currentSessionId == sessionId) return
+        inferenceJob?.cancel()
+        viewModelScope.launch(Dispatchers.IO) {
+            val sessionMessages = chatRepository.loadSessionMessages(sessionId)
+            _uiState.update {
+                it.copy(
+                    currentSessionId = sessionId,
+                    messages = sessionMessages,
+                    isGenerating = false,
+                    selectedImageUri = null,
+                    selectedVideoUri = null,
+                    selectedFileUri = null,
+                    selectedFileName = null,
+                    selectedFileType = null,
+                    extractedOcrText = null
+                )
+            }
+            if (inferenceEngine.isModelLoaded) {
+                inferenceEngine.resetConversation(
+                    systemPrompt = _uiState.value.systemPrompt,
+                    initialHistory = buildEngineHistory()
+                )
+            }
+        }
+    }
+
+    /**
+     * Renames an existing chat session.
+     */
+    fun renameSession(sessionId: String, newTitle: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            chatRepository.renameSession(sessionId, newTitle)
+            val updated = chatRepository.loadSessions()
+            _uiState.update { it.copy(sessions = updated) }
+        }
+    }
+
+    /**
+     * Deletes a chat session. If the deleted session was active, switches to another or creates a new one.
+     */
+    fun deleteSession(sessionId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            chatRepository.deleteSession(sessionId)
+            val updated = chatRepository.loadSessions()
+            if (_uiState.value.currentSessionId == sessionId) {
+                if (updated.isNotEmpty()) {
+                    val next = updated.first()
+                    val nextMessages = chatRepository.loadSessionMessages(next.id)
+                    _uiState.update {
+                        it.copy(
+                            sessions = updated,
+                            currentSessionId = next.id,
+                            messages = nextMessages,
+                            isGenerating = false
+                        )
+                    }
+                    if (inferenceEngine.isModelLoaded) {
+                        inferenceEngine.resetConversation(
+                            systemPrompt = _uiState.value.systemPrompt,
+                            initialHistory = buildEngineHistory()
+                        )
+                    }
+                } else {
+                    createNewSession()
+                }
+            } else {
+                _uiState.update { it.copy(sessions = updated) }
+            }
+        }
+    }
+
+    /**
+     * Regenerates the last assistant response in the active chat.
+     */
+    fun regenerateLastResponse() {
+        if (_uiState.value.isGenerating) return
+        val current = _uiState.value.messages
+        if (current.isEmpty()) return
+
+        val last = current.lastOrNull()
+        val (historyBeforeTurn, userTurn) = when {
+            last != null && !last.isUser -> {
+                val userIndex = current.indexOfLast { it.isUser }
+                if (userIndex != -1) {
+                    val turn = current[userIndex]
+                    val history = current.subList(0, userIndex)
+                    history to turn
+                } else {
+                    emptyList<ChatMessage>() to null
+                }
+            }
+            last != null && last.isUser -> {
+                val history = current.dropLast(1)
+                history to last
+            }
+            else -> emptyList<ChatMessage>() to null
+        }
+
+        if (userTurn != null) {
+            _uiState.update {
+                it.copy(
+                    messages = historyBeforeTurn,
+                    selectedImageUri = userTurn.imageUri,
+                    selectedVideoUri = userTurn.videoUri,
+                    selectedFileUri = userTurn.fileUri,
+                    selectedFileName = userTurn.fileName,
+                    selectedFileType = userTurn.fileType,
+                    extractedOcrText = userTurn.ocrText
+                )
+            }
+            saveMessages(historyBeforeTurn)
+            sendMessage(userTurn.content)
         }
     }
 
@@ -1320,7 +1690,22 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 isGenerating = false
             )
         }
-        saveMessages(emptyList())
+        val activeId = _uiState.value.currentSessionId
+        if (activeId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                chatRepository.saveSessionMessages(activeId, emptyList())
+                val updatedSessions = chatRepository.loadSessions()
+                _uiState.update { it.copy(sessions = updatedSessions) }
+            }
+        }
+        // The engine keeps the conversation natively, so the model's own turn
+        // history has to be dropped as well.
+        viewModelScope.launch(Dispatchers.IO) {
+            inferenceEngine.resetConversation(
+                systemPrompt = _uiState.value.systemPrompt,
+                initialHistory = emptyList()
+            )
+        }
     }
 
     fun importModelFile(context: Context, uri: Uri, callback: (Boolean, String) -> Unit) {
@@ -1369,6 +1754,36 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         context.stopService(Intent(context, ModelDownloadService::class.java))
         inferenceJob?.cancel()
         inferenceEngine.close()
+    }
+
+    private fun extractVideoKeyframe(context: Context, uri: Uri, maxDimension: Int = 1024): Bitmap? {
+        return try {
+            val retriever = android.media.MediaMetadataRetriever()
+            retriever.setDataSource(context, uri)
+            val durationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationUs = (durationStr?.toLongOrNull() ?: 1000L) * 1000L
+            val targetUs = (durationUs / 2).coerceAtLeast(0L)
+            val frame = retriever.getFrameAtTime(targetUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime(0L)
+            retriever.release()
+            frame?.let { raw ->
+                val maxSide = maxOf(raw.width, raw.height)
+                if (maxSide > maxDimension) {
+                    val scale = maxDimension.toFloat() / maxSide.toFloat()
+                    val matrix = android.graphics.Matrix().apply { postScale(scale, scale) }
+                    val scaled = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+                    if (scaled != raw) {
+                        raw.recycle()
+                    }
+                    scaled
+                } else {
+                    raw
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("LlmViewModel", "Could not extract video keyframe: ${e.message}")
+            null
+        }
     }
 
     private fun decodeSampledBitmap(context: Context, uri: Uri, maxDimension: Int = 1024): Bitmap? {
