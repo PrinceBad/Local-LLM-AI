@@ -11,6 +11,11 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.ModelInfo
+import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.RepetitionPenaltyConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +30,23 @@ class LlmInferenceEngine(private val context: Context) {
     private var engine: Engine? = null
     private var conversation: Conversation? = null
     private var currentModelPath: String? = null
+    /** System instruction bound to the conversation's native system slot. */
+    private var systemPrompt: String? = null
+    /** Prior turns replayed as native user/model messages when the conversation is created. */
+    private var initialHistory: List<Message> = emptyList()
+    private var samplerConfig: SamplerConfig? = null
+    private var thinkingConfig: ThinkingConfig? = null
+    private val failedNpuModelPaths = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** Real maximum context window size detected dynamically from ModelInfo. */
+    var detectedMaxContextTokens: Int = 0
+        private set
+    /** Whether the loaded bundle natively supports reasoning/thinking according to ModelInfo. */
+    var detectedSupportsThinking: Boolean = false
+        private set
+    /** Whether the loaded bundle supports multimodal image inputs according to ModelInfo. */
+    var detectedSupportsVision: Boolean = false
+        private set
     /** The backend that successfully loaded the current model ("NPU", "GPU", "CPU", or "None"). */
     var activeBackend: String = "None"
         private set
@@ -50,16 +72,45 @@ class LlmInferenceEngine(private val context: Context) {
         modelPath: String,
         preferredBackend: String = "AUTO",
         contextTurns: Int = 6,
+        systemPrompt: String? = null,
+        initialHistory: List<Message> = emptyList(),
+        samplerConfig: SamplerConfig? = null,
+        thinkingConfig: ThinkingConfig? = null,
         onStageUpdate: ((String) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             // Close previous session
             close()
             lastNpuError = null
+            this@LlmInferenceEngine.currentModelPath = modelPath
+            this@LlmInferenceEngine.systemPrompt = systemPrompt
+            this@LlmInferenceEngine.initialHistory = initialHistory
+            this@LlmInferenceEngine.samplerConfig = samplerConfig
+            this@LlmInferenceEngine.thinkingConfig = thinkingConfig
 
             val modelFile = File(modelPath)
             if (!modelFile.exists()) {
-                return@withContext Result.failure(Exception("Model file does not exist at: $modelPath"))
+                return@withContext Result.failure(Exception("Model file does not exist: $modelPath"))
+            }
+
+            val preset = ModelPreset.findByIdOrFileName(modelFile.name)
+
+            // Dynamically inspect model metadata (context window, thinking, modalities)
+            try {
+                ModelInfo.from(modelPath).use { info ->
+                    detectedMaxContextTokens = info.maxContextTokens()
+                    detectedSupportsVision = info.inputModalities().vision
+                    val presetReasoning = (preset?.isReasoningModel == true) || (preset?.tags?.contains(ModelTag.REASONING) == true)
+                    if (info is ModelInfo.Llm) {
+                        detectedSupportsThinking = info.supportsThinking() || presetReasoning
+                    } else {
+                        detectedSupportsThinking = presetReasoning
+                    }
+                    android.util.Log.i("LlmInferenceEngine", "ModelInfo: maxContext=$detectedMaxContextTokens, vision=$detectedSupportsVision, thinking=$detectedSupportsThinking")
+                }
+            } catch (e: Throwable) {
+                android.util.Log.w("LlmInferenceEngine", "ModelInfo extraction skipped: ${e.message}")
+                detectedSupportsThinking = preset?.isReasoningModel ?: false
             }
 
             onStageUpdate?.invoke("Validating model file\u2026")
@@ -76,7 +127,6 @@ class LlmInferenceEngine(private val context: Context) {
             // All .litertlm bundles have section_backend_constraint: gpu baked in,
             // so default to GPU_ONLY for unrecognized .litertlm files to prevent
             // a wasteful CPU fallback that always fails with INVALID_ARGUMENT.
-            val preset = ModelPreset.presets.firstOrNull { it.fileName.equals(modelFile.name, ignoreCase = true) }
             val restriction = preset?.backendRestriction
                 ?: if (modelPath.endsWith(".litertlm", ignoreCase = true)) {
                     LlmBackendRestriction.GPU_ONLY
@@ -106,7 +156,14 @@ class LlmInferenceEngine(private val context: Context) {
             // ============================================================
             // STEP 1: Attempt NPU initialization (Qualcomm Hexagon HTP)
             // ============================================================
+            val npuCachePrefs = context.getSharedPreferences("npu_backend_cache", android.content.Context.MODE_PRIVATE)
+            val isKnownNpuFailure = failedNpuModelPaths.contains(modelPath) || npuCachePrefs.getBoolean(modelPath, false)
+            if (isKnownNpuFailure && preferredBackend == "AUTO") {
+                android.util.Log.i("LlmInferenceEngine", "Skipping NPU for ${File(modelPath).name}: cached as incompatible (lacks QNN HTP subgraphs)")
+            }
+
             val canAttemptNpu = socInfo.isQnnRuntimeAvailable &&
+                (!isKnownNpuFailure || preferredBackend == "NPU_ONLY") &&
                 (preferredBackend == "AUTO" || preferredBackend == "NPU_ONLY") &&
                 (restriction == LlmBackendRestriction.NPU_ONLY || restriction == LlmBackendRestriction.ANY)
 
@@ -133,17 +190,30 @@ class LlmInferenceEngine(private val context: Context) {
                         backend = Backend.NPU(nativeLibraryDir = nativeLibDir),
                         cacheDir = context.cacheDir.absolutePath
                     )
-                    val newEngine = Engine(config)
-                    newEngine.initialize()
-                    engine = newEngine
-                    conversation = newEngine.createConversation()
-                    currentModelPath = modelPath
-                    activeBackend = "NPU"
-                    loaded = true
+                    var tempEngine: Engine? = null
+                    try {
+                        tempEngine = Engine(config)
+                        tempEngine.initialize()
+                        engine = tempEngine
+                        conversation = newConversation(tempEngine)
+                        currentModelPath = modelPath
+                        activeBackend = "NPU"
+                        loaded = true
+                    } catch (initEx: Throwable) {
+                        // Ensure no native QNN / Hexagon context or DMA-BUF mappings leak before GPU attempt
+                        try {
+                            tempEngine?.close()
+                        } catch (closeEx: Throwable) {
+                            android.util.Log.w("LlmInferenceEngine", "Error closing failed NPU engine: ${closeEx.message}")
+                        }
+                        throw initEx
+                    }
                 } catch (e: Throwable) {
                     npuError = e
                     lastNpuError = e
-                    android.util.Log.e("LlmInferenceEngine", "Failed to load model on NPU", e)
+                    failedNpuModelPaths.add(modelPath)
+                    npuCachePrefs.edit().putBoolean(modelPath, true).apply()
+                    android.util.Log.w("LlmInferenceEngine", "NPU initialization failed for ${File(modelPath).name} (Community .litertlm bundles typically lack Qualcomm QNN HTP subgraphs): ${e.message}. Cached NPU failure; falling back to GPU.")
                     // NPU failed — fall through to GPU unless NPU_ONLY is enforced
                     if (restriction == LlmBackendRestriction.NPU_ONLY || preferredBackend == "NPU_ONLY") {
                         return@withContext Result.failure(Exception(
@@ -187,18 +257,18 @@ class LlmInferenceEngine(private val context: Context) {
                             )
                             val newEngine = Engine(config)
                             if (preferredBackend == "AUTO") {
-                                val initOk = kotlinx.coroutines.withTimeoutOrNull(40_000L) {
+                                val initOk = kotlinx.coroutines.withTimeoutOrNull(75_000L) {
                                     newEngine.initialize()
                                     true
                                 }
                                 if (initOk == null) {
-                                    throw RuntimeException("GPU shader compilation timed out after 40s")
+                                    throw RuntimeException("GPU shader compilation timed out after 75s")
                                 }
                             } else {
                                 newEngine.initialize()
                             }
                             engine = newEngine
-                            conversation = newEngine.createConversation()
+                            conversation = newConversation(newEngine)
                             currentModelPath = modelPath
                             activeBackend = "GPU"
                             loaded = true
@@ -236,7 +306,7 @@ class LlmInferenceEngine(private val context: Context) {
 
                     onStageUpdate?.invoke("Initializing CPU backend\u2026")
                     try {
-                        val threadCount = if (Runtime.getRuntime().availableProcessors() >= 8) 4 else 2
+                        val threadCount = detectBigCoreThreadCount()
                         val config = EngineConfig(
                             modelPath = modelPath,
                             backend = Backend.CPU(threadCount),
@@ -245,7 +315,7 @@ class LlmInferenceEngine(private val context: Context) {
                         val newEngine = Engine(config)
                         newEngine.initialize()
                         engine = newEngine
-                        conversation = newEngine.createConversation()
+                        conversation = newConversation(newEngine)
                         currentModelPath = modelPath
                         activeBackend = "CPU"
                         loaded = true
@@ -304,10 +374,70 @@ class LlmInferenceEngine(private val context: Context) {
     }
 
     /**
+     * Creates a conversation that uses the model's own chat semantics:
+     * the system instruction occupies the real system slot and prior turns are
+     * replayed as native user/model messages.
+     *
+     * Flattening the transcript into a single user turn (the previous
+     * behaviour) pushes the prompt out of the model's training distribution,
+     * which makes aligned and abliterated small models fall back to their
+     * safety priors and refuse.
+     */
+    private fun newConversation(engineInstance: Engine): Conversation {
+        val instruction = systemPrompt?.takeIf { it.isNotBlank() }
+        val template = if (isChatMlOrQwenModel(currentModelPath)) QWEN_CHATML_TEMPLATE else null
+        val defaultThinking = currentModelPath?.let { ModelPreset.findByIdOrFileName(File(it).name)?.defaultThinkingEnabled } ?: false
+        val effectiveThinking = if (detectedSupportsThinking) (thinkingConfig ?: ThinkingConfig(enableThinking = defaultThinking)) else null
+        val config = ConversationConfig(
+            systemInstruction = instruction?.let { Contents.of(it) },
+            initialMessages = initialHistory,
+            samplerConfig = samplerConfig,
+            thinkingConfig = effectiveThinking,
+            chatTemplate = template
+        )
+        return engineInstance.createConversation(config)
+    }
+
+    /**
+     * Recreates the conversation so a new system instruction, updated sampler,
+     * or a cleared history takes effect. The loaded model and its backend stay intact.
+     */
+    fun resetConversation(
+        systemPrompt: String? = this.systemPrompt,
+        initialHistory: List<Message> = this.initialHistory,
+        samplerConfig: SamplerConfig? = this.samplerConfig,
+        thinkingConfig: ThinkingConfig? = this.thinkingConfig
+    ): Boolean {
+        val activeEngine = engine ?: return false
+        this.systemPrompt = systemPrompt
+        this.initialHistory = initialHistory
+        this.samplerConfig = samplerConfig
+        this.thinkingConfig = thinkingConfig
+        try {
+            conversation?.close()
+        } catch (e: Exception) {
+            android.util.Log.w("LlmInferenceEngine", "Failed to close previous conversation", e)
+        }
+        conversation = null
+        return try {
+            conversation = newConversation(activeEngine)
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("LlmInferenceEngine", "Failed to reset conversation", e)
+            false
+        }
+    }
+
+    /**
      * Generates a streaming response flow for the given prompt.
      * Optionally accepts a native image bitmap for multimodal vision models.
      */
-    fun generateResponse(prompt: String, image: Bitmap? = null): Flow<String> = callbackFlow {
+    fun generateResponse(
+        prompt: String,
+        image: Bitmap? = null,
+        repetitionPenaltyConfig: RepetitionPenaltyConfig? = null,
+        turnThinkingConfig: ThinkingConfig? = null
+    ): Flow<String> = callbackFlow {
         val currentConversation = conversation
         if (currentConversation == null) {
             close(Exception("Model not loaded yet. Please load a model first."))
@@ -338,12 +468,39 @@ class LlmInferenceEngine(private val context: Context) {
                 Message.user(prompt)
             }
 
-            currentConversation.sendMessageAsync(message)
+            val effectiveThinkingConfig = if (detectedSupportsThinking) {
+                val defaultThinking = currentModelPath?.let { ModelPreset.findByIdOrFileName(File(it).name)?.defaultThinkingEnabled } ?: false
+                val req = turnThinkingConfig ?: this@LlmInferenceEngine.thinkingConfig ?: ThinkingConfig(enableThinking = defaultThinking)
+                // If thinking is enabled, clamp budget to min(1024, context / 3) for all thinking-capable models
+                if (req.enableThinking) {
+                    val maxBudget = if (detectedMaxContextTokens > 0) {
+                        minOf(1024, detectedMaxContextTokens / 3)
+                    } else {
+                        512
+                    }
+                    val budgetedTokens = if (req.thinkingTokenBudget in 1..maxBudget) req.thinkingTokenBudget else maxBudget
+                    ThinkingConfig(enableThinking = true, thinkingTokenBudget = budgetedTokens)
+                } else {
+                    req
+                }
+            } else {
+                null
+            }
+            currentConversation.sendMessageAsync(
+                message = message,
+                repetitionPenaltyConfig = repetitionPenaltyConfig,
+                thinkingConfig = effectiveThinkingConfig
+            )
                 .flowOn(Dispatchers.Default)
                 .collect { chunk ->
-                    trySend(chunk.toString())
+                    val text = chunk.toString()
+                    if (text.isNotEmpty()) {
+                        trySend(text)
+                    }
                 }
             channel.close()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             close(e)
         }
@@ -373,6 +530,94 @@ class LlmInferenceEngine(private val context: Context) {
             engine = null
             currentModelPath = null
             activeBackend = "None"
+        }
+    }
+
+    /**
+     * Determines the optimal thread count targeting performance / big CPU cores.
+     * Google LiteRT benchmarks use 4 threads. Spawning threads on efficiency cores
+     * introduces synchronization bottlenecks that slow down XNNPACK token decode.
+     */
+    private fun detectBigCoreThreadCount(): Int {
+        return try {
+            val available = Runtime.getRuntime().availableProcessors()
+            val cpuDir = File("/sys/devices/system/cpu")
+            val maxFreqs = mutableListOf<Long>()
+            for (i in 0 until available) {
+                val freqFile = File(cpuDir, "cpu$i/cpufreq/cpuinfo_max_freq")
+                if (freqFile.exists() && freqFile.canRead()) {
+                    freqFile.readText().trim().toLongOrNull()?.let { maxFreqs.add(it) }
+                }
+            }
+            if (maxFreqs.isNotEmpty()) {
+                val medianFreq = maxFreqs.sorted()[maxFreqs.size / 2]
+                val bigCores = maxFreqs.count { it >= medianFreq }
+                bigCores.coerceIn(2, 4)
+            } else {
+                if (available >= 8) 4 else 2
+            }
+        } catch (_: Throwable) {
+            if (Runtime.getRuntime().availableProcessors() >= 8) 4 else 2
+        }
+    }
+
+    companion object {
+        /**
+         * Qwen / ChatML Jinja template that handles sequence-based message content
+         * without triggering the LiteRT-LM Minja parser error:
+         * "tried to use + operator on unsupported types string and sequence"
+         */
+        const val QWEN_CHATML_TEMPLATE =
+            "{%- for message in messages -%}" +
+            "{{- '<|im_start|>' + message.role + '\n' -}}" +
+            "{%- if message.content is string -%}" +
+            "{{- message.content -}}" +
+            "{%- else -%}" +
+            "{%- for item in message.content -%}" +
+            "{%- if item.text is defined -%}" +
+            "{{- item.text -}}" +
+            "{%- elif item is string -%}" +
+            "{{- item -}}" +
+            "{%- endif -%}" +
+            "{%- endfor -%}" +
+            "{%- endif -%}" +
+            "{{- '<|im_end|>\n' -}}" +
+            "{%- endfor -%}" +
+            "{%- if add_generation_prompt -%}" +
+            "{{- '<|im_start|>assistant\n' -}}" +
+            "{%- endif -%}"
+
+        fun isChatMlOrQwenModel(path: String?): Boolean {
+            if (path == null) return false
+            val file = File(path)
+            val lowerName = file.name.lowercase()
+            if (lowerName.contains("qwen") || lowerName.contains("deepseek") || lowerName.contains("chatml") || lowerName.contains("qwq")) {
+                return true
+            }
+            val preset = ModelPreset.findByIdOrFileName(file.name)
+            if (preset != null) {
+                val pId = preset.id.lowercase()
+                val pFile = preset.fileName.lowercase()
+                if (pId.contains("qwen") || pId.contains("deepseek") || pFile.contains("qwen") || pFile.contains("deepseek")) {
+                    return true
+                }
+            }
+            if (file.exists() && (path.endsWith(".litertlm", ignoreCase = true) || path.endsWith(".zip", ignoreCase = true))) {
+                try {
+                    java.util.zip.ZipFile(file).use { zip ->
+                        val entry = zip.getEntry("tokenizer_config.json")
+                        if (entry != null) {
+                            val text = zip.getInputStream(entry).bufferedReader().readText()
+                            if (text.contains("im_start") || text.contains("qwen", ignoreCase = true)) {
+                                return true
+                            }
+                        }
+                    }
+                } catch (ignored: Throwable) {
+                    // Best-effort check
+                }
+            }
+            return false
         }
     }
 }
