@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.auralocalai.MainActivity
@@ -42,6 +43,7 @@ class ModelDownloadService : Service() {
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var activeDownloadJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var downloader: ModelDownloader
     private lateinit var notificationManager: NotificationManager
 
@@ -69,6 +71,19 @@ class ModelDownloadService : Service() {
         if (url.isBlank() || fileName.isBlank() || modelId.isBlank()) {
             stopSelf()
             return START_NOT_STICKY
+        }
+
+        // Acquire partial wake lock to keep download active when screen turns off or device enters Doze mode
+        try {
+            if (wakeLock == null) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AuraLocalAI:ModelDownloadWakeLock")?.apply {
+                    setReferenceCounted(false)
+                }
+            }
+            wakeLock?.acquire(120 * 60 * 1000L) // 2 hours max safety timeout
+        } catch (we: Exception) {
+            Log.w(TAG, "Could not acquire WakeLock: ${we.message}")
         }
 
         // Start Foreground Service safely
@@ -120,6 +135,11 @@ class ModelDownloadService : Service() {
                             )
                             showCompletionNotification(modelId, fileName, false)
                         }
+try {
+                            if (wakeLock?.isHeld == true) {
+                                wakeLock?.release()
+                            }
+                        } catch (_: Exception) {}
                         stopSelf()
                     }
                     is DownloadState.Error -> {
@@ -129,6 +149,11 @@ class ModelDownloadService : Service() {
                             message = state.message
                         )
                         showCompletionNotification(modelId, fileName, false)
+try {
+                            if (wakeLock?.isHeld == true) {
+                                wakeLock?.release()
+                            }
+                        } catch (_: Exception) {}
                         stopSelf()
                     }
                 }
@@ -143,6 +168,14 @@ class ModelDownloadService : Service() {
     override fun onDestroy() {
         activeDownloadJob?.cancel()
         serviceJob.cancel()
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (we: Exception) {
+            Log.w(TAG, "Error releasing WakeLock in onDestroy: ${we.message}")
+        }
+        wakeLock = null
         super.onDestroy()
     }
 
