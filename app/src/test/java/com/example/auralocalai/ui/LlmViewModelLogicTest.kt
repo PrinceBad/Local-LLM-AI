@@ -100,4 +100,54 @@ class LlmViewModelLogicTest {
             }
         }
     }
+
+    @Test
+    fun `shader cache files and binary artifacts are rejected from model lists`() {
+        val filenames = listOf(
+            "qwen3-1.7b.litertlm_1792854192_977184032_mldrift_weight_cache.bin",
+            "qwen3-1.7b.litertlm_1792854192_977184032_mldrift_program_cache.bin",
+            "model.bin",
+            "downloading.tmp",
+            "partial.crdownload",
+            ".hidden.litertlm",
+            "valid-model.litertlm",
+            "mediapipe-model.task"
+        )
+
+        val validModelExtensions = listOf(".litertlm", ".task")
+        val filteredModels = filenames.filter { name ->
+            validModelExtensions.any { name.endsWith(it, ignoreCase = true) } &&
+            !name.contains("cache", ignoreCase = true) &&
+            !name.contains("mldrift", ignoreCase = true) &&
+            !name.endsWith(".tmp", ignoreCase = true) &&
+            !name.startsWith(".")
+        }
+
+        assertEquals(2, filteredModels.size)
+        assertTrue(filteredModels.contains("valid-model.litertlm"))
+        assertTrue(filteredModels.contains("mediapipe-model.task"))
+        assertFalse(filteredModels.any { it.contains("mldrift") })
+        assertFalse(filteredModels.any { it.endsWith(".bin") })
+    }
+
+    @Test
+    fun `custom models list in UI excludes shader caches and bin files`() {
+        val localModels = listOf(
+            "qwen3-1.7b.litertlm_1792854192_977184032_mldrift_weight_cache.bin",
+            "qwen3-1.7b.litertlm_1792854192_977184032_mldrift_program_cache.bin",
+            "custom-finetuned.litertlm",
+            "qwen3-1.7b.litertlm"
+        )
+
+        val customModels = localModels.filter { fileName ->
+            !ModelPreset.presetsByFileName.containsKey(fileName.lowercase()) &&
+            !fileName.contains("cache", ignoreCase = true) &&
+            !fileName.contains("mldrift", ignoreCase = true) &&
+            !fileName.endsWith(".bin", ignoreCase = true) &&
+            (fileName.endsWith(".litertlm", ignoreCase = true) || fileName.endsWith(".task", ignoreCase = true))
+        }
+
+        assertEquals(1, customModels.size)
+        assertEquals("custom-finetuned.litertlm", customModels.first())
+    }
 }

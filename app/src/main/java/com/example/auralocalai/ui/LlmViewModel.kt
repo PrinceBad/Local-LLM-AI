@@ -458,7 +458,30 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshDownloadedModels() {
         val files = storageDir.listFiles() ?: emptyArray()
-        val localFiles = files.filter { it.isFile && (it.name.endsWith(".task") || it.name.endsWith(".bin") || it.name.endsWith(".litertlm")) }.map { it.name }
+
+        // Strictly recognize genuine LiteRT-LM model bundles (.litertlm and .task)
+        // Reject binary cache files (_cache.bin, mldrift) and temporary files
+        val validModelExtensions = listOf(".litertlm", ".task")
+        val modelFiles = files.filter { file ->
+            file.isFile &&
+            validModelExtensions.any { file.name.endsWith(it, ignoreCase = true) } &&
+            !file.name.contains("cache", ignoreCase = true) &&
+            !file.name.contains("mldrift", ignoreCase = true) &&
+            !file.name.endsWith(".tmp", ignoreCase = true) &&
+            !file.name.startsWith(".")
+        }
+
+        // Clean up orphaned shader cache files whose parent model file is no longer present
+        files.filter { file ->
+            file.isFile && (file.name.contains("mldrift", ignoreCase = true) || file.name.contains("_cache.bin", ignoreCase = true))
+        }.forEach { cacheFile ->
+            val hasParentModel = modelFiles.any { model -> cacheFile.name.startsWith(model.name) }
+            if (!hasParentModel) {
+                try { cacheFile.delete() } catch (_: Throwable) {}
+            }
+        }
+
+        val localFiles = modelFiles.map { it.name }
         _uiState.update { it.copy(localModels = localFiles) }
     }
 
@@ -562,6 +585,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 val tempFile = File(storageDir, "$fileName.tmp")
                 if (tempFile.exists()) {
                     tempFile.delete()
+                }
+                // Also clean up any associated GPU / NPU shader cache files
+                val cachePrefix = fileName.substringBeforeLast(".")
+                storageDir.listFiles()?.forEach { f ->
+                    if (f.name.startsWith(cachePrefix) && (f.name.contains("cache", ignoreCase = true) || f.name.contains("mldrift", ignoreCase = true))) {
+                        try { f.delete() } catch (_: Throwable) {}
+                    }
                 }
                 val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == fileName }
                 val presetId = matchingPreset?.id ?: fileName
@@ -716,6 +746,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         inferenceJob?.cancel()
         _uiState.update { it.copy(isGenerating = false, isSearching = false, activeSearchQuery = null) }
         saveMessages(_uiState.value.messages)
+        // Reset the engine conversation so that any cancelled C++ decode state is cleaned up
+        viewModelScope.launch(Dispatchers.IO) {
+            inferenceEngine.resetConversation(
+                systemPrompt = _uiState.value.systemPrompt,
+                initialHistory = buildEngineHistory()
+            )
+        }
     }
 
     fun setWebSearchMode(mode: WebSearchMode) {
@@ -818,11 +855,21 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun friendlyErrorMessage(raw: String?): String {
-        if (raw.isNullOrBlank()) return "An unknown error occurred while loading the model. Please try again."
+    private fun friendlyErrorMessage(raw: String?, isGeneration: Boolean = false): String {
+        if (raw.isNullOrBlank()) {
+            return if (isGeneration) "Response generation encountered an error. Please try again."
+                   else "An unknown error occurred while loading the model. Please try again."
+        }
 
         val lower = raw.lowercase()
         return when {
+            // Conversation lifecycle
+            lower.contains("conversation is not alive") || lower.contains("not alive") ->
+                "Conversation session was reset. Please try sending your message again."
+
+            lower.contains("cancellationexception") || lower.contains("job was cancelled") ->
+                "Generation was stopped."
+
             // Out of memory / resource exhaustion
             lower.contains("resource_exhausted") || lower.contains("out of memory") ||
             lower.contains("oom") || lower.contains("insufficient memory") ->
@@ -857,7 +904,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             // Catch-all: return the original trimmed if too long
             else -> {
                 val trimmed = if (raw.length > 250) raw.take(250) + "…" else raw
-                "Model loading failed: $trimmed"
+                if (isGeneration) "Generation error: $trimmed" else "Model loading failed: $trimmed"
             }
         }
     }
@@ -1196,9 +1243,16 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
+                val errorMsg = when {
+                    e.message?.contains("dynamite", ignoreCase = true) == true ||
+                    e.message?.contains("null object reference", ignoreCase = true) == true ||
+                    e.message?.contains("Waiting for the text optional module", ignoreCase = true) == true ->
+                        "Text recognition model is initializing via Google Play Services. Please retry shortly."
+                    else -> "Failed to parse file: ${e.localizedMessage ?: "Unknown error"}"
+                }
                 _uiState.update { 
                     it.copy(
-                        attachmentError = "Failed to parse file: ${e.localizedMessage}",
+                        attachmentError = errorMsg,
                         isAttachmentProcessing = false
                     )
                 }
@@ -1467,7 +1521,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         tokenCount++
                         accumulatedBuilder.append(partialToken)
                         val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastUpdateTime > 80) {
+                        if (currentTime - lastUpdateTime > 100) {
                             val currentSnapshot = accumulatedBuilder.toString()
                             _uiState.update { state ->
                                 val updatedMessages = ArrayList(state.messages)
@@ -1485,7 +1539,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 if (accumulatedBuilder.isEmpty()) {
-                    accumulatedBuilder.append(friendlyErrorMessage(e.message))
+                    accumulatedBuilder.append(friendlyErrorMessage(e.message, isGeneration = true))
                 }
             } finally {
                 imageBitmap?.recycle()
@@ -1713,10 +1767,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val fileName = getFileName(context, uri)
                 if (!fileName.endsWith(".litertlm", ignoreCase = true) &&
-                    !fileName.endsWith(".task", ignoreCase = true) &&
-                    !fileName.endsWith(".bin", ignoreCase = true)) {
+                    !fileName.endsWith(".task", ignoreCase = true)) {
                     viewModelScope.launch(Dispatchers.Main) {
-                        callback(false, "Invalid file format. File must end with .litertlm, .task, or .bin")
+                        callback(false, "Invalid file format. File must end with .litertlm or .task")
                     }
                     return@launch
                 }

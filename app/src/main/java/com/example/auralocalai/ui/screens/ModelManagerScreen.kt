@@ -240,7 +240,11 @@ fun ModelManagerScreen(
 
             // Sideloaded Custom Models List
             val customModels = uiState.localModels.filter { fileName ->
-                !ModelPreset.presetsByFileName.containsKey(fileName.lowercase())
+                !ModelPreset.presetsByFileName.containsKey(fileName.lowercase()) &&
+                !fileName.contains("cache", ignoreCase = true) &&
+                !fileName.contains("mldrift", ignoreCase = true) &&
+                !fileName.endsWith(".bin", ignoreCase = true) &&
+                (fileName.endsWith(".litertlm", ignoreCase = true) || fileName.endsWith(".task", ignoreCase = true))
             }
             if (customModels.isNotEmpty()) {
                 item {
@@ -499,7 +503,7 @@ fun PresetModelCard(
                         }
 
                         // RAM requirement Pill tag (clean without duplicate RAM:)
-                        val cleanRam = preset.ramRequirement.replace("RAM:", "").trim()
+                        val cleanRam = preset.ramRequirement.replace("RAM:", "").replace("RAM", "").trim()
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
