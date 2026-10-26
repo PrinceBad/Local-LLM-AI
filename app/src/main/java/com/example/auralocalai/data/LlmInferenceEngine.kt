@@ -16,7 +16,9 @@ import com.google.ai.edge.litertlm.ModelInfo
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.RepetitionPenaltyConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -83,8 +85,8 @@ class LlmInferenceEngine(private val context: Context) {
         onStageUpdate: ((String) -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // Close previous session
-            close()
+            // Close previous session asynchronously without blocking
+            closeAsync()
             lastNpuError = null
             this@LlmInferenceEngine.currentModelPath = modelPath
             this@LlmInferenceEngine.systemPrompt = systemPrompt
@@ -524,8 +526,10 @@ class LlmInferenceEngine(private val context: Context) {
                     }
             }
 
+            var turnCompletedNormally = false
             try {
                 runTurn(currentConversation)
+                turnCompletedNormally = true
             } catch (convEx: Throwable) {
                 val msg = convEx.message.orEmpty()
                 val isDead = convEx is IllegalStateException ||
@@ -537,8 +541,18 @@ class LlmInferenceEngine(private val context: Context) {
                     val freshConv = newConversation(engine!!)
                     conversation = freshConv
                     runTurn(freshConv)
+                    turnCompletedNormally = true
                 } else {
                     throw convEx
+                }
+            } finally {
+                // If turn was aborted or cancelled mid-stream, safely reset native conversation
+                // so subsequent requests do not encounter dirty state or 'turn still active' crashes
+                if (!turnCompletedNormally) {
+                    try { currentConversation.close() } catch (_: Throwable) {}
+                    if (conversation === currentConversation) {
+                        conversation = null
+                    }
                 }
             }
             channel.close()
@@ -553,27 +567,49 @@ class LlmInferenceEngine(private val context: Context) {
         }
     }.flowOn(Dispatchers.IO)
 
-    /**
-     * Frees resources by closing the active LLM inference instance.
-     */
-    fun close() = runBlocking {
-        inferenceMutex.withLock {
-            try {
-                conversation?.close()
-            } catch (e: Exception) {
-                // Ignore
-            } finally {
-                conversation = null
-            }
+    private fun closeInternal() {
+        try {
+            conversation?.close()
+        } catch (_: Throwable) {
+            // Ignore
+        } finally {
+            conversation = null
+        }
 
+        try {
+            engine?.close()
+        } catch (_: Throwable) {
+            // Ignore
+        } finally {
+            engine = null
+            currentModelPath = null
+            activeBackend = "None"
+        }
+    }
+
+    /**
+     * Asynchronously frees native engine and conversation resources with mutex locking.
+     */
+    suspend fun closeAsync() {
+        inferenceMutex.withLock {
+            closeInternal()
+        }
+    }
+
+    /**
+     * Synchronously frees resources by closing the active LLM inference instance.
+     * Uses non-blocking tryLock or background IO dispatch to prevent Main-thread ANRs.
+     */
+    fun close() {
+        if (inferenceMutex.tryLock()) {
             try {
-                engine?.close()
-            } catch (e: Exception) {
-                // Ignore
+                closeInternal()
             } finally {
-                engine = null
-                currentModelPath = null
-                activeBackend = "None"
+                inferenceMutex.unlock()
+            }
+        } else {
+            CoroutineScope(Dispatchers.IO).launch {
+                closeAsync()
             }
         }
     }

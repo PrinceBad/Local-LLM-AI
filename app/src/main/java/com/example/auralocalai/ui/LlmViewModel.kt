@@ -45,6 +45,7 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -576,7 +577,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteModel(fileName: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = File(storageDir, fileName)
                 if (file.exists()) {
@@ -596,7 +597,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == fileName }
                 val presetId = matchingPreset?.id ?: fileName
                 if (uiState.value.activeModelId == presetId) {
-                    inferenceEngine.close()
+                    inferenceEngine.closeAsync()
                     _uiState.update { 
                         it.copy(
                             modelState = ModelState.Unloaded,
@@ -817,7 +818,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelLoading() {
         loadModelJob?.cancel()
         loadModelJob = null
-        inferenceEngine.close()
+        viewModelScope.launch(Dispatchers.IO) {
+            inferenceEngine.closeAsync()
+        }
         _uiState.update { 
             it.copy(
                 modelState = ModelState.Unloaded,
@@ -1232,8 +1235,19 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 } else {
-                    val text = context.contentResolver.openInputStream(uri)?.use { 
-                        it.bufferedReader().readText() 
+                    val maxTextChars = 24_000
+                    val text = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val reader = stream.bufferedReader()
+                        val buffer = CharArray(maxTextChars)
+                        val numRead = reader.read(buffer, 0, maxTextChars)
+                        if (numRead > 0) {
+                            val fileContent = String(buffer, 0, numRead)
+                            if (reader.read() != -1) {
+                                "$fileContent\n\n[Attachment truncated to first $maxTextChars characters for context & memory safety]"
+                            } else {
+                                fileContent
+                            }
+                        } else ""
                     }
                     _uiState.update { 
                         it.copy(
@@ -1359,7 +1373,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             renameSession(currentSession.id, cleanTitle)
         }
 
-        inferenceJob = viewModelScope.launch {
+        inferenceJob = viewModelScope.launch(Dispatchers.Default) {
             val activeModel = _uiState.value.activeModelId
             val activePreset = ModelPreset.findByIdOrFileName(activeModel)
             val contextCapacity = activePreset?.effectiveContextTokens ?: ModelPreset.DEFAULT_CONTEXT_TOKENS
@@ -1448,7 +1462,15 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             // inside the user turn. Only the per-turn payload is sent, which
             // keeps the prompt inside the model's training distribution.
             val currentPrefix = when {
-                ocrText != null && activeModel?.contains("gemma", ignoreCase = true) != true -> "[Extracted Text from Attachment: $ocrText]\n"
+                ocrText != null && activeModel?.contains("gemma", ignoreCase = true) != true -> {
+                    val maxAttachmentChars = minOf(8000, (contextCapacity * 2).coerceAtLeast(1500))
+                    val boundedOcr = if (ocrText.length > maxAttachmentChars) {
+                        ocrText.take(maxAttachmentChars).trimEnd() + "\n[Attachment text clipped for context limit]"
+                    } else {
+                        ocrText
+                    }
+                    "[Extracted Text from Attachment: $boundedOcr]\n"
+                }
                 else -> ""
             }
 
@@ -1467,14 +1489,16 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val supportsVision = activePreset?.supportsVision
                 ?: (activeModel?.contains("gemma", ignoreCase = true) == true)
             val context = getApplication<Application>().applicationContext
-            val imageBitmap: Bitmap? = when {
-                imageUri != null && supportsVision -> {
-                    decodeSampledBitmap(context, Uri.parse(imageUri), maxDimension = 1024)
+            val imageBitmap: Bitmap? = withContext(Dispatchers.IO) {
+                when {
+                    imageUri != null && supportsVision -> {
+                        decodeSampledBitmap(context, Uri.parse(imageUri), maxDimension = 1024)
+                    }
+                    videoUri != null && supportsVision -> {
+                        extractVideoKeyframe(context, Uri.parse(videoUri), maxDimension = 1024)
+                    }
+                    else -> null
                 }
-                videoUri != null && supportsVision -> {
-                    extractVideoKeyframe(context, Uri.parse(videoUri), maxDimension = 1024)
-                }
-                else -> null
             }
 
             val promptTokens = estimatePromptTokens(currentTurn, hasImage = (imageBitmap != null))
@@ -1810,15 +1834,14 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun extractVideoKeyframe(context: Context, uri: Uri, maxDimension: Int = 1024): Bitmap? {
+        val retriever = android.media.MediaMetadataRetriever()
         return try {
-            val retriever = android.media.MediaMetadataRetriever()
             retriever.setDataSource(context, uri)
             val durationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
             val durationUs = (durationStr?.toLongOrNull() ?: 1000L) * 1000L
             val targetUs = (durationUs / 2).coerceAtLeast(0L)
             val frame = retriever.getFrameAtTime(targetUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: retriever.getFrameAtTime(0L)
-            retriever.release()
             frame?.let { raw ->
                 val maxSide = maxOf(raw.width, raw.height)
                 if (maxSide > maxDimension) {
@@ -1836,6 +1859,10 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             Log.w("LlmViewModel", "Could not extract video keyframe: ${e.message}")
             null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Throwable) {}
         }
     }
 

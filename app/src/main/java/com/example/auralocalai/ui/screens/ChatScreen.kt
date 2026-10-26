@@ -265,12 +265,7 @@ fun ChatScreen(
         }
     )
 
-    // Scroll to bottom on new messages
-    LaunchedEffect(uiState.messages.size) {
-        if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
-        }
-    }
+
 
     if (showRenameDialog != null) {
         AlertDialog(
@@ -647,9 +642,30 @@ fun ChatScreen(
                 .imePadding()
         ) {
             val isKeyboardVisible = WindowInsets.isImeVisible
-            LaunchedEffect(isKeyboardVisible, uiState.messages.size, uiState.isGenerating) {
+            val isAtBottom by remember {
+                derivedStateOf {
+                    val layoutInfo = listState.layoutInfo
+                    val total = layoutInfo.totalItemsCount
+                    if (total == 0) true
+                    else {
+                        val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        lastVisible >= total - 2
+                    }
+                }
+            }
+
+            // Scroll to bottom when message count changes or soft keyboard toggles
+            LaunchedEffect(uiState.messages.size, isKeyboardVisible) {
                 if (uiState.messages.isNotEmpty()) {
                     listState.animateScrollToItem(uiState.messages.size - 1)
+                }
+            }
+
+            // Follow streaming tokens in real time ONLY when user is already near bottom (no fighting manual scrolling)
+            val lastContentLength = uiState.messages.lastOrNull()?.content?.length ?: 0
+            LaunchedEffect(lastContentLength) {
+                if (uiState.isGenerating && isAtBottom && uiState.messages.isNotEmpty()) {
+                    listState.scrollToItem(uiState.messages.size - 1)
                 }
             }
 
@@ -1521,7 +1537,7 @@ fun ChatBubble(
                     ) {
                         Column(
                             modifier = Modifier
-                                .animateContentSize()
+                                .then(if (!isThinkingLive) Modifier.animateContentSize() else Modifier)
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Row(
