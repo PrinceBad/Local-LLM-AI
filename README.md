@@ -7,13 +7,12 @@
 <br/>
 
 [![Latest release](https://img.shields.io/badge/releases-GitHub-181717?style=for-the-badge&logo=github&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases/latest)
-[![Version](https://img.shields.io/badge/version-v3.0.0-blue?style=for-the-badge&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&labelColor=0d1117)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/PrinceBad/Local-LLM-AI/total?style=for-the-badge&logo=github&labelColor=0d1117)](https://github.com/PrinceBad/Local-LLM-AI/releases)
 [![Android](https://img.shields.io/badge/platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white&labelColor=0d1117)](#download)
 <br/>
 
-[**Download**](#download) • [**Features**](#features) • [**Supported Models**](#supported-models) • [**What's New in v3.0**](#recent-architecture-uiux--quality-of-life-innovations-v30) • [**Screenshots**](#screenshots) • [**Credits**](#credits) • [**Disclaimer**](#disclaimer)
+[**Download**](#download) • [**Features**](#features) • [**Supported Models**](#supported-models) • [**Innovations**](#recent-architecture-uiux--quality-of-life-innovations) • [**Screenshots**](#screenshots) • [**Credits**](#credits) • [**Disclaimer**](#disclaimer)
 
 </div>
 
@@ -74,7 +73,7 @@ The app includes built-in presets for 10 highly-capable, lightweight models opti
 
 ---
 
-### Recent Architecture, UI/UX & Quality-of-Life Innovations (v3.0)
+### Recent Architecture, UI/UX & Quality-of-Life Innovations
 
 - **UI Smoothness & Lazy Windowing Overhaul**: Converted Settings into a windowed `LazyColumn` with modular item recycling, eliminating initial load stalls and delivering fluid 60/120 Hz scroll performance. Replaced dynamic object allocations during slider drags and chip switching with zero-allocation `entries` and memoized values.
 - **Anchor-Aware Chat Auto-Scroll**: Fixed streaming text jitter by anchoring `scrollToItem` to the bottom of the active message bubble (`offset = 100,000`), completely eliminating jumping to offset 0 as long responses stream in.
