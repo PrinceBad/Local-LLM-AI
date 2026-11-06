@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.auralocalai"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 26
+        versionName = "2.6.0"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -23,6 +23,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Note: Signed with debug keystore for easy sideloading in local and testing releases.
+            // TODO: Replace with production signing keystore before publishing to Google Play.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -106,7 +108,7 @@ dependencies {
   // 0.18.x is required by current .litertlm bundles (litert-community ships
   // "needs LiteRT-LM 0.18.0 or newer" artifacts) and adds the chat-template
   // metadata handling plus ConversationConfig.chatTemplate / ModelInfo.
-  implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.1")
+  implementation("com.google.ai.edge.litertlm:litertlm-android:0.19.0")
 
   // AndroidX Security Crypto for hardware-backed EncryptedSharedPreferences
   implementation("androidx.security:security-crypto:1.1.0-alpha06")

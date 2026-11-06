@@ -43,4 +43,10 @@ class LlmInferenceEngineTest {
         assertFalse("Cannot use + message.content +", template.contains("+ message.content"))
         assertFalse("Cannot use + message['content']", template.contains("+ message['content']"))
     }
+
+    @Test
+    fun testNpuCacheVersion_isExplicitlyStamped() {
+        assertTrue("NPU cache version must be stamped for migration", LlmInferenceEngine.NPU_CACHE_VERSION.isNotBlank())
+        assertTrue("NPU cache version must include version identifier", LlmInferenceEngine.NPU_CACHE_VERSION.contains("v2.6"))
+    }
 }

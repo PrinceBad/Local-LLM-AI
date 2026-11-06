@@ -125,6 +125,33 @@ class ModelSafetyValidatorTest {
         assertFalse(htmlError.exists())
         assertTrue("Good model should remain intact", goodModel.exists())
     }
+
+    @Test
+    fun testSweepPreservesActiveResumingDownloads() = runTest {
+        val storageDir = tempFolder.newFolder("model_storage_resume")
+
+        // Active download (< 24h old, non-empty)
+        val activeTmp = File(storageDir, "active_download.tmp").apply { writeText("download chunk in progress") }
+        // Stale download (> 24h old)
+        val staleTmp = File(storageDir, "stale_download.tmp").apply {
+            writeText("abandoned download")
+            setLastModified(System.currentTimeMillis() - (48L * 60 * 60 * 1000L))
+        }
+        // Zero-byte temporary download
+        val emptyTmp = File(storageDir, "empty_download.part").apply { writeText("") }
+        val goodModel = File(storageDir, "model.litertlm").apply { writeBytes("LITERTLM_VALID_PAYLOAD".toByteArray()) }
+
+        val swept = ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(
+            storageDir,
+            maxAgeMs = 24L * 60 * 60 * 1000L
+        )
+
+        assertEquals("Should have swept 2 files (stale and empty)", 2, swept)
+        assertTrue("Active in-progress download must be preserved for HTTP 206 resume", activeTmp.exists())
+        assertFalse("Stale download must be swept", staleTmp.exists())
+        assertFalse("Empty download must be swept", emptyTmp.exists())
+        assertTrue("Good model must be preserved", goodModel.exists())
+    }
     @Test
     fun testDynamicRamFloorsPerPresetAndContextSlider() {
         val preset4Gb = ModelPreset(
@@ -186,5 +213,9 @@ class ModelSafetyValidatorTest {
 
         // 4. Multimodal headroom constant check:
         assertEquals(500L * 1024L * 1024L, ModelSafetyValidator.MULTIMODAL_VISION_OVERHEAD_BYTES)
+
+        // 5. NPU unified staging buffer overhead delta (780 MiB):
+        val availNpuAt6Turns = ModelSafetyValidator.getMinRequiredAvailableRamBytes(preset6Gb, isGpu = false, isNpu = true, contextTurns = 6)
+        assertEquals("NPU overhead must match GPU unified buffer overhead of exactly 780 MiB", 780L * 1024L * 1024L, availNpuAt6Turns - availAt6Turns)
     }
 }

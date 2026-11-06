@@ -38,7 +38,7 @@
 -keepnames class com.example.auralocalai.data.ChatSession { *; }
 -keepnames class com.example.auralocalai.ui.ChatMessage { *; }
 -keepnames class com.example.auralocalai.ui.InferenceTelemetry { *; }
--keepnames class com.example.auralocalai.ui.SearchSource { *; }
+-keepnames class com.example.auralocalai.data.SearchSource { *; }
 
 # Google ML Kit Text Recognition and Vision
 -keep class com.google.mlkit.** { *; }

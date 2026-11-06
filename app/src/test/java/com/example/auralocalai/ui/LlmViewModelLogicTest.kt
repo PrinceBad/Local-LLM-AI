@@ -150,4 +150,45 @@ class LlmViewModelLogicTest {
         assertEquals(1, customModels.size)
         assertEquals("custom-finetuned.litertlm", customModels.first())
     }
+
+    @Test
+    fun `friendlyErrorMessage prioritizes NPU diagnostics over generic backend restriction`() {
+        val npuUnsupportedErr = "This model bundle (qwen3-4b.litertlm) does not support NPU execution. Supported backends: [GPU]."
+        val msg1 = LlmViewModel.friendlyErrorMessage(npuUnsupportedErr)
+        assertTrue("Must preserve NPU model incompatibility message", msg1.contains("does not support NPU execution"))
+
+        val npuUnavailableErr = "NPU backend was preferred, but Qualcomm QNN runtime is not available (Missing HTP library)"
+        val msg2 = LlmViewModel.friendlyErrorMessage(npuUnavailableErr)
+        assertEquals(
+            "NPU acceleration was requested, but NPU runtime is not available on this device. Switch to Auto or GPU in Settings.",
+            msg2
+        )
+
+        val npuInitFail = "Failed to load model on NPU: Hexagon RPC initialization failure. Backend restriction or preference prevents fallback."
+        val msg3 = LlmViewModel.friendlyErrorMessage(npuInitFail)
+        assertEquals(
+            "NPU initialization failed for this model. Switch to Auto or GPU backend in Settings.",
+            msg3
+        )
+
+        val gpuRestrictionErr = "Backend restriction (GPU_ONLY) or preference (GPU_ONLY) prevents fallback to CPU."
+        val msg4 = LlmViewModel.friendlyErrorMessage(gpuRestrictionErr)
+        assertEquals(
+            "This model requires Vulkan GPU acceleration. Check your GPU backend settings.",
+            msg4
+        )
+    }
+
+    @Test
+    fun `friendlyErrorMessage handles NPU backend restriction failure`() {
+        val npuRestricted = "Backend restriction (GPU_ONLY) prevents running this model on NPU. Please select Auto or GPU in Settings."
+        val msg = LlmViewModel.friendlyErrorMessage(npuRestricted)
+        assertTrue(msg.contains("requires Vulkan GPU acceleration") || msg.contains("GPU backend settings"))
+    }
+
+    @Test
+    fun `UiState defaults autoLoadModelOnStartup to false`() {
+        val defaultState = UiState()
+        assertFalse("Auto-load must default to false to prevent startup ANR and Hexagon RAM spikes", defaultState.autoLoadModelOnStartup)
+    }
 }

@@ -264,6 +264,8 @@ fun ModelManagerScreen(
                     val isActive = uiState.activeModelId == fileName
                     val isLoaded = uiState.modelState is ModelState.Loaded && isActive
                     val isLoading = uiState.modelState is ModelState.Loading && isActive
+                    val sideloadedFile = remember(fileName) { java.io.File(context.filesDir, fileName) }
+                    val actualBytes = remember(sideloadedFile) { if (sideloadedFile.exists()) sideloadedFile.length() else 0L }
 
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -284,7 +286,7 @@ fun ModelManagerScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Sideloaded offline model file.",
+                                text = "Sideloaded offline model file (${ModelPreset.formatDecimalBytes(actualBytes)}).",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -296,7 +298,7 @@ fun ModelManagerScreen(
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 OutlinedButton(
-                                    onClick = { modelToDelete = ModelPreset(id = fileName, name = fileName, description = "Sideloaded offline model file.", sizeBytes = 0L, minRamGb = 4, downloadUrl = "", fileName = fileName, requiresHfToken = false, expectedExtension = "", backendRestriction = LlmBackendRestriction.ANY) },
+                                    onClick = { modelToDelete = ModelPreset(id = fileName, name = fileName, description = "Sideloaded offline model file.", sizeBytes = actualBytes, minRamGb = 4, downloadUrl = "", fileName = fileName, requiresHfToken = false, expectedExtension = "", backendRestriction = LlmBackendRestriction.ANY) },
                                     shape = RoundedCornerShape(18.dp),
                                     modifier = Modifier.height(36.dp),
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),

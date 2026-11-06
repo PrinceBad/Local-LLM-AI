@@ -218,7 +218,10 @@ fun ChatScreen(
         speechRecognizer = recognizer
 
         onDispose {
-            recognizer?.destroy()
+            try {
+                speechRecognizer?.destroy()
+            } catch (_: Throwable) {}
+            speechRecognizer = null
         }
     }
 
@@ -681,7 +684,8 @@ fun ChatScreen(
                         onNavigateToModelManager = onNavigateToModelManager,
                         onQuickPrompt = { prompt ->
                             viewModel.sendMessage(prompt)
-                        }
+                        },
+                        technicalDetails = uiState.lastLoadErrorRaw
                     )
                 }
             } else {
@@ -892,6 +896,50 @@ fun ChatScreen(
                                 thickness = 1.dp,
                                 modifier = Modifier.padding(vertical = 4.dp)
                             )
+                        }
+
+                        // In-chat Thinking Mode chip (visible when loaded model supports reasoning/thinking)
+                        if (uiState.detectedSupportsThinking) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    onClick = { viewModel.toggleThinkingForCurrentModel() },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (uiState.enableThinking) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    },
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = if (uiState.enableThinking) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                        } else {
+                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                        }
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (uiState.enableThinking) "\uD83E\uDDE0 Thinking ON" else "\uD83E\uDDE0 Thinking OFF",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (uiState.enableThinking) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         // Input control row (attachment consolidated button, voice button, text field, send button)
@@ -1498,7 +1546,7 @@ fun ChatBubble(
 
                 // Parse think blocks only for AI assistant messages from reasoning models
                 // TODO: consider incremental parsing from last known offset if this shows up in profiling
-                val parsed = if (!message.isUser && isReasoningModel) {
+                val parsed = if (!message.isUser && (isReasoningModel || message.content.contains("<think>"))) {
                     remember(message.content) { parseThinkBlocks(message.content) }
                 } else {
                     ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content)
@@ -1848,7 +1896,8 @@ fun EmptyStateOnboarding(
     modelState: ModelState,
     localModels: List<String>,
     onNavigateToModelManager: () -> Unit,
-    onQuickPrompt: (String) -> Unit
+    onQuickPrompt: (String) -> Unit,
+    technicalDetails: String? = null
 ) {
     val haptic = LocalHapticFeedback.current
     Box(
@@ -2018,6 +2067,37 @@ fun EmptyStateOnboarding(
                         textAlign = TextAlign.Center,
                         lineHeight = 18.sp
                     )
+                    if (!technicalDetails.isNullOrBlank()) {
+                        var showDetails by remember { mutableStateOf(false) }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        TextButton(
+                            onClick = { showDetails = !showDetails },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (showDetails) "Hide Technical Details" else "View Technical Details",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        if (showDetails) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                            ) {
+                                androidx.compose.foundation.text.selection.SelectionContainer {
+                                    Text(
+                                        text = technicalDetails,
+                                        fontSize = 11.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(20.dp))
                     Button(
                         onClick = onNavigateToModelManager,

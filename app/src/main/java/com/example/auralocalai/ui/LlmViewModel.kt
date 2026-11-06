@@ -122,6 +122,7 @@ data class UiState(
     val activeModelId: String? = null,
     val activeBackend: String = "None",
     val lastNpuError: String? = null,
+    val lastLoadErrorRaw: String? = null,
     val localModels: List<String> = emptyList(),
     val selectedImageUri: String? = null,
     val selectedVideoUri: String? = null,
@@ -159,6 +160,7 @@ data class UiState(
     val detectedMaxContextTokens: Int = 0,
     val detectedSupportsThinking: Boolean = false,
     val detectedSupportsVision: Boolean = false,
+    val autoLoadModelOnStartup: Boolean = false,
     val sessions: List<ChatSession> = emptyList(),
     val currentSessionId: String? = null
 )
@@ -329,6 +331,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         val initialRepetitionPenalty = prefs.getFloat("sampler_repetition_penalty", 1.1f)
         val initialEnableThinking = prefs.getBoolean("sampler_enable_thinking", true)
         val initialThinkingBudget = prefs.getInt("sampler_thinking_budget", -1)
+        val initialAutoLoad = prefs.getBoolean("auto_load_last_model", false)
 
         _uiState.update { 
             it.copy(
@@ -346,7 +349,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 topK = initialTopK,
                 repetitionPenalty = initialRepetitionPenalty,
                 enableThinking = initialEnableThinking,
-                thinkingTokenBudget = initialThinkingBudget
+                thinkingTokenBudget = initialThinkingBudget,
+                autoLoadModelOnStartup = initialAutoLoad
             ) 
         }
 
@@ -422,8 +426,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             // 1. Migrate any models from old storage directories safely
             migrateExistingModels()
 
-            // 2. Sweep incomplete or corrupted artifacts asynchronously on Dispatchers.IO (prevents cold-start ANRs)
-            ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(storageDir)
+            // 2. Sweep incomplete or corrupted artifacts asynchronously on Dispatchers.IO (prevents cold-start ANRs; preserves active .tmp files < 24h)
+            ModelSafetyValidator.sweepCorruptedOrIncompleteArtifacts(storageDir, maxAgeMs = 24 * 60 * 60 * 1000L)
 
             // 3. Refresh downloaded model list
             refreshDownloadedModels()
@@ -447,11 +451,19 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     || Build.SUPPORTED_ABIS.any { it.contains("x86") }
 
             if (!isEmulator) {
-                val firstDownloaded = _uiState.value.localModels.firstOrNull()
-                if (firstDownloaded != null) {
-                    val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == firstDownloaded }
-                    val modelId = matchingPreset?.id ?: firstDownloaded
-                    loadModel(firstDownloaded, modelId)
+                val autoLoadPending = prefs.getBoolean("auto_load_pending", false)
+                if (autoLoadPending) {
+                    Log.w("LlmViewModel", "Previous session crashed during auto-load. Skipping auto-load to prevent boot loop.")
+                    prefs.edit().putBoolean("auto_load_pending", false).apply()
+                    _uiState.update { it.copy(modelState = ModelState.Error("Previous startup auto-load crashed. Auto-load skipped.")) }
+                } else {
+                    val autoLoad = prefs.getBoolean("auto_load_last_model", false)
+                    val lastModelFile = prefs.getString("last_active_model_file", null)
+                    val lastModelId = prefs.getString("last_active_model_id", null)
+                    if (autoLoad && !lastModelFile.isNullOrBlank() && File(storageDir, lastModelFile).exists()) {
+                        prefs.edit().putBoolean("auto_load_pending", true).apply()
+                        loadModel(lastModelFile, lastModelId ?: lastModelFile)
+                    }
                 }
             }
         }
@@ -677,6 +689,23 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
      * Updates model inference and sampling parameters.
      * Recreates conversation state with the new sampler settings if a model is active.
      */
+    fun getThinkingForModel(modelId: String): Boolean {
+        val appPrefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        val prefKey = "thinking_$modelId"
+        if (appPrefs.contains(prefKey)) {
+            return appPrefs.getBoolean(prefKey, false)
+        }
+        val preset = ModelPreset.findByIdOrFileName(modelId)
+        return preset?.defaultThinkingEnabled ?: false
+    }
+
+    fun toggleThinkingForCurrentModel() {
+        val activeId = _uiState.value.activeModelId ?: return
+        val current = _uiState.value.enableThinking
+        val newSetting = !current
+        updateSamplerSettings(enableThinking = newSetting)
+    }
+
     fun updateSamplerSettings(
         temperature: Float = _uiState.value.temperature,
         topP: Float = _uiState.value.topP,
@@ -687,14 +716,18 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val context = getApplication<Application>().applicationContext
         val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        prefs.edit()
+        val activeId = _uiState.value.activeModelId
+        val editor = prefs.edit()
             .putFloat("sampler_temperature", temperature)
             .putFloat("sampler_top_p", topP)
             .putInt("sampler_top_k", topK)
             .putFloat("sampler_repetition_penalty", repetitionPenalty)
             .putBoolean("sampler_enable_thinking", enableThinking)
             .putInt("sampler_thinking_budget", thinkingBudget)
-            .apply()
+        if (activeId != null) {
+            editor.putBoolean("thinking_$activeId", enableThinking)
+        }
+        editor.apply()
 
         _uiState.update {
             it.copy(
@@ -715,10 +748,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     temperature = temperature.toDouble(),
                     seed = 0
                 )
-                val thinking = ThinkingConfig(
-                    enableThinking = enableThinking,
-                    thinkingTokenBudget = thinkingBudget
-                )
+                val thinking = if (_uiState.value.detectedSupportsThinking) {
+                    ThinkingConfig(
+                        enableThinking = enableThinking,
+                        thinkingTokenBudget = thinkingBudget
+                    )
+                } else null
                 inferenceEngine.resetConversation(
                     systemPrompt = _uiState.value.systemPrompt,
                     initialHistory = buildEngineHistory(),
@@ -744,6 +779,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopGeneration() {
+        inferenceEngine.cancelInference()
         inferenceJob?.cancel()
         _uiState.update { it.copy(isGenerating = false, isSearching = false, activeSearchQuery = null) }
         saveMessages(_uiState.value.messages)
@@ -816,17 +852,26 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelLoading() {
+        val currentJob = loadModelJob
         loadModelJob?.cancel()
         loadModelJob = null
-        viewModelScope.launch(Dispatchers.IO) {
-            inferenceEngine.closeAsync()
-        }
         _uiState.update { 
             it.copy(
                 modelState = ModelState.Unloaded,
+                activeModelId = null,
+                activeBackend = "None",
                 loadingModelId = null,
-                loadingStage = null
+                loadingStage = null,
+                detectedMaxContextTokens = 0,
+                detectedSupportsThinking = false,
+                detectedSupportsVision = false
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                currentJob?.join()
+            } catch (_: Throwable) {}
+            inferenceEngine.closeAsync()
         }
     }
 
@@ -850,64 +895,86 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun stripThinkingBlocks(rawContent: String): String = Companion.stripThinkingBlocks(rawContent)
 
+    fun friendlyErrorMessage(raw: String?, isGeneration: Boolean = false): String =
+        Companion.friendlyErrorMessage(raw, isGeneration)
+
     companion object {
         fun stripThinkingBlocks(rawContent: String): String {
             return rawContent
                 .replace(Regex("""<think>[\s\S]*?(</think>|\Z)""", RegexOption.IGNORE_CASE), "")
                 .trim()
         }
-    }
 
-    private fun friendlyErrorMessage(raw: String?, isGeneration: Boolean = false): String {
-        if (raw.isNullOrBlank()) {
-            return if (isGeneration) "Response generation encountered an error. Please try again."
-                   else "An unknown error occurred while loading the model. Please try again."
-        }
+        fun friendlyErrorMessage(raw: String?, isGeneration: Boolean = false): String {
+            if (raw.isNullOrBlank()) {
+                return if (isGeneration) "Response generation encountered an error. Please try again."
+                       else "An unknown error occurred while loading the model. Please try again."
+            }
 
-        val lower = raw.lowercase()
-        return when {
-            // Conversation lifecycle
-            lower.contains("conversation is not alive") || lower.contains("not alive") ->
-                "Conversation session was reset. Please try sending your message again."
+            val lower = raw.lowercase()
+            return when {
+                // Conversation lifecycle
+                lower.contains("conversation is not alive") || lower.contains("not alive") ->
+                    "Conversation session was reset. Please try sending your message again."
 
-            lower.contains("cancellationexception") || lower.contains("job was cancelled") ->
-                "Generation was stopped."
+                lower.contains("cancellationexception") || lower.contains("job was cancelled") ->
+                    "Generation was stopped."
 
-            // Out of memory / resource exhaustion
-            lower.contains("resource_exhausted") || lower.contains("out of memory") ||
-            lower.contains("oom") || lower.contains("insufficient memory") ->
-                "Not enough device/GPU memory to load this model. Try closing background apps or switching to a smaller model (e.g. Qwen 1.5B or DeepSeek 1.5B)."
+                // Out of memory / resource exhaustion
+                lower.contains("resource_exhausted") || lower.contains("out of memory") ||
+                lower.contains("oom") || lower.contains("insufficient memory") ||
+                lower.contains("vk_error_out_of_device_memory") || lower.contains("out_of_device_memory") ->
+                    "Not enough device/GPU memory to load this model. Try closing background apps, reducing context window turns, or switching to CPU in Settings."
 
-            // File corruption or validation failure
-            lower.contains("corrupted") || lower.contains("incomplete") ||
-            lower.contains("not a valid model") || lower.contains("flatbuffer") ||
-            lower.contains("tfl3") || lower.contains("zip archive") ->
-                "The model file appears to be incomplete or corrupted. Please delete it in Manage Models and re-download."
+                // File corruption or validation failure
+                lower.contains("corrupted") || lower.contains("incomplete") ||
+                lower.contains("not a valid model") || lower.contains("flatbuffer") ||
+                lower.contains("tfl3") || lower.contains("zip archive") ->
+                    "The model file appears to be incomplete or corrupted. Please delete it in Manage Models and re-download."
 
-            // Model file missing
-            lower.contains("does not exist") || lower.contains("no such file") ->
-                "Model file was not found on disk. Please download a model from the Models catalog."
+                // Model file missing
+                lower.contains("does not exist") || lower.contains("no such file") ->
+                    "Model file was not found on disk. Please download a model from the Models catalog."
 
-            // Emulator / architecture guard
-            lower.contains("emulator") || lower.contains("x86") ->
-                "On-device LLM inference is not supported on emulators. Please use a physical ARM64 device."
+                // Emulator / architecture guard
+                lower.contains("emulator") || lower.contains("x86") ->
+                    "On-device LLM inference is not supported on emulators. Please use a physical ARM64 device."
 
-            // RAM insufficient for CPU path
-            lower.contains("inference aborted") || (lower.contains("ram") && lower.contains("prevent")) ->
-                "This device does not have enough RAM to run this model safely. Try a smaller model."
+                // RAM insufficient for CPU path
+                lower.contains("inference aborted") || (lower.contains("ram") && lower.contains("prevent")) ->
+                    "This device does not have enough RAM to run this model safely. Try a smaller model."
 
-            // GPU init failure or backend restriction
-            lower.contains("backend restriction") || lower.contains("gpu_only") ->
-                "This model requires Vulkan GPU acceleration. Check your GPU backend settings."
+                // Specific NPU failures
+                lower.contains("does not support npu") ->
+                    raw.take(250)
 
-            // Specific NPU only failure
-            lower.contains("npu backend was preferred") ->
-                "NPU acceleration was requested, but Qualcomm QNN runtime is not available for this model. Switch to Auto or GPU in Settings."
+                lower.contains("npu backend was preferred") || lower.contains("qnn runtime is not available") ->
+                    "NPU acceleration was requested, but NPU runtime is not available on this device. Switch to Auto or GPU in Settings."
 
-            // Catch-all: return the original trimmed if too long
-            else -> {
-                val trimmed = if (raw.length > 250) raw.take(250) + "…" else raw
-                if (isGeneration) "Generation error: $trimmed" else "Model loading failed: $trimmed"
+                lower.contains("failed to load model on npu") || lower.contains("failed to load model on google tensor") ->
+                    "NPU initialization failed for this model. Switch to Auto or GPU backend in Settings."
+
+                // GPU timeout
+                lower.contains("timed out") && lower.contains("gpu") ->
+                    "GPU shader compilation timed out after 75s. Switch to CPU backend in Settings for this model."
+
+                // Specific Vulkan driver failure
+                lower.contains("vk_error") ->
+                    "Vulkan GPU error: ${raw.take(200)}. Try switching to CPU in Settings."
+
+                // Backend restriction to GPU only
+                (lower.contains("backend restriction") || lower.contains("gpu_only")) && lower.contains("gpu_only") ->
+                    "This model requires Vulkan GPU acceleration. Check your GPU backend settings."
+
+                // General backend restrictions (NPU / CPU)
+                lower.contains("backend restriction") || lower.contains("does not allow npu") || lower.contains("does not permit cpu") ->
+                    raw.take(250)
+
+                // Catch-all: return the original trimmed if too long
+                else -> {
+                    val trimmed = if (raw.length > 250) raw.take(250) + "…" else raw
+                    if (isGeneration) "Generation error: $trimmed" else "Model loading failed: $trimmed"
+                }
             }
         }
     }
@@ -979,9 +1046,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 temperature = _uiState.value.temperature.toDouble(),
                 seed = 0
             )
-            val modelDefaultThinking = matchingPreset?.defaultThinkingEnabled ?: false
+            val effectiveThinking = getThinkingForModel(modelId)
             val thinking = ThinkingConfig(
-                enableThinking = if (matchingPreset != null) modelDefaultThinking else _uiState.value.enableThinking,
+                enableThinking = effectiveThinking,
                 thinkingTokenBudget = _uiState.value.thinkingTokenBudget
             )
 
@@ -1000,6 +1067,13 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
             if (result.isSuccess) {
                 recordModelLoadBenchmark(modelId, elapsedMs)
+                val appPrefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+                appPrefs.edit()
+                    .putString("last_active_model_file", fileName)
+                    .putString("last_active_model_id", modelId)
+                    .putBoolean("auto_load_pending", false)
+                    .apply()
+
                 val supportsThinking = inferenceEngine.detectedSupportsThinking
                 _uiState.update { 
                     it.copy(
@@ -1016,21 +1090,30 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         detectedMaxContextTokens = inferenceEngine.detectedMaxContextTokens,
                         detectedSupportsThinking = supportsThinking,
                         detectedSupportsVision = inferenceEngine.detectedSupportsVision,
-                        enableThinking = if (supportsThinking) (matchingPreset?.defaultThinkingEnabled ?: it.enableThinking) else false
+                        enableThinking = if (supportsThinking) effectiveThinking else false,
+                        lastLoadErrorRaw = null
                     )
                 }
             } else {
+                val appPrefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+                appPrefs.edit().putBoolean("auto_load_pending", false).apply()
+                val rawError = result.exceptionOrNull()?.message ?: result.exceptionOrNull()?.toString()
                 _uiState.update { 
                     it.copy(
-                        modelState = ModelState.Error(friendlyErrorMessage(result.exceptionOrNull()?.message)),
+                        modelState = ModelState.Error(friendlyErrorMessage(rawError)),
+                        lastLoadErrorRaw = rawError,
+                        activeModelId = null,
                         activeBackend = "None",
                         loadingModelId = null,
+                        loadingStage = null,
+                        detectedMaxContextTokens = 0,
+                        detectedSupportsThinking = false,
+                        detectedSupportsVision = false,
                         lastNpuError = inferenceEngine.lastNpuError?.let { err ->
                             val sw = java.io.StringWriter()
                             err.printStackTrace(java.io.PrintWriter(sw))
                             sw.toString()
-                        },
-                        loadingStage = null
+                        }
                     )
                 }
             }
@@ -1461,8 +1544,10 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             // (bound when the conversation is created), so it is NOT repeated
             // inside the user turn. Only the per-turn payload is sent, which
             // keeps the prompt inside the model's training distribution.
+            val isVisionModel = inferenceEngine.detectedSupportsVision || (activePreset?.supportsVision == true)
+
             val currentPrefix = when {
-                ocrText != null && activeModel?.contains("gemma", ignoreCase = true) != true -> {
+                ocrText != null && !isVisionModel -> {
                     val maxAttachmentChars = minOf(8000, (contextCapacity * 2).coerceAtLeast(1500))
                     val boundedOcr = if (ocrText.length > maxAttachmentChars) {
                         ocrText.take(maxAttachmentChars).trimEnd() + "\n[Attachment text clipped for context limit]"
@@ -1486,8 +1571,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val currentTurn = turnParts.joinToString("\n\n")
 
             // Extract downsampled bitmap natively if a vision-capable model is loaded (from image or video keyframe)
-            val supportsVision = activePreset?.supportsVision
-                ?: (activeModel?.contains("gemma", ignoreCase = true) == true)
+            val supportsVision = isVisionModel
             val context = getApplication<Application>().applicationContext
             val imageBitmap: Bitmap? = withContext(Dispatchers.IO) {
                 when {
@@ -1798,24 +1882,42 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
+                val tempFile = File(storageDir, "$fileName.import.tmp")
                 val destFile = File(storageDir, fileName)
-                context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    destFile.outputStream().use { outputStream ->
-                        inputStream.copyTo(outputStream)
-                    }
-                }
-                
-                if (!isValidModelFile(destFile)) {
-                    destFile.delete()
-                    viewModelScope.launch(Dispatchers.Main) {
-                        callback(false, "Validation failed. The imported file is corrupted or not a valid LiteRT/MediaPipe model.")
-                    }
-                    return@launch
-                }
 
-                viewModelScope.launch(Dispatchers.Main) {
-                    refreshDownloadedModels()
-                    callback(true, "Successfully imported $fileName!")
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                        tempFile.outputStream().use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    } ?: throw IllegalStateException("Unable to open input stream from selected file.")
+
+                    // Validate the temporary file completely BEFORE replacing the destination
+                    if (!ModelSafetyValidator.isValidModelFile(tempFile)) {
+                        tempFile.delete()
+                        viewModelScope.launch(Dispatchers.Main) {
+                            callback(false, "Validation failed. The imported file is corrupted or not a valid LiteRT/MediaPipe model.")
+                        }
+                        return@launch
+                    }
+
+                    // Atomic move to destination
+                    val moved = ModelSafetyValidator.moveFileSafely(tempFile, destFile)
+                    if (!moved) {
+                        tempFile.delete()
+                        viewModelScope.launch(Dispatchers.Main) {
+                            callback(false, "Failed to finalize imported model file.")
+                        }
+                        return@launch
+                    }
+
+                    viewModelScope.launch(Dispatchers.Main) {
+                        refreshDownloadedModels()
+                        callback(true, "Successfully imported $fileName!")
+                    }
+                } catch (innerEx: Throwable) {
+                    if (tempFile.exists()) tempFile.delete()
+                    throw innerEx
                 }
             } catch (e: Exception) {
                 viewModelScope.launch(Dispatchers.Main) {
@@ -1823,6 +1925,16 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    fun setAutoLoadModelOnStartup(enabled: Boolean) {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("auto_load_last_model", enabled).apply()
+        _uiState.update { it.copy(autoLoadModelOnStartup = enabled) }
+    }
+
+    fun resetNpuCache() {
+        inferenceEngine.clearNpuFailureCache()
     }
 
     override fun onCleared() {

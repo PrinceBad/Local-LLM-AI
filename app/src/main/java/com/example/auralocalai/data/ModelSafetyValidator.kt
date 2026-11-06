@@ -196,6 +196,7 @@ object ModelSafetyValidator {
     fun getMinRequiredAvailableRamBytes(
         preset: ModelPreset? = null,
         isGpu: Boolean = false,
+        isNpu: Boolean = false,
         modelFile: File? = null,
         contextTurns: Int = 6
     ): Long {
@@ -208,8 +209,8 @@ object ModelSafetyValidator {
         val kvCacheOverhead = (clampedTurns * (75L * 1024L * 1024L) * contextScaleFactor).toLong()
         val scratchActivationOverhead = 350L * 1024L * 1024L
         val kvAndActivationOverhead = maxOf(MIN_SCRATCH_BUFFER_BYTES, kvCacheOverhead + scratchActivationOverhead)
-        val gpuOverhead = if (isGpu) GPU_BUFFER_OVERHEAD_BYTES else 0L
-        return modelSizeBytes + kvAndActivationOverhead + gpuOverhead
+        val hardwareBufferOverhead = if (isGpu || isNpu) GPU_BUFFER_OVERHEAD_BYTES else 0L
+        return modelSizeBytes + kvAndActivationOverhead + hardwareBufferOverhead
     }
 
     /**
@@ -245,6 +246,7 @@ object ModelSafetyValidator {
         context: Context,
         preset: ModelPreset? = null,
         isGpu: Boolean = false,
+        isNpu: Boolean = false,
         modelFile: File? = null,
         contextTurns: Int = 6
     ): Result<Unit> {
@@ -266,7 +268,11 @@ object ModelSafetyValidator {
 
         val reqGb = requiredGbLabel.toLongOrNull() ?: 6L
         val totalGb = "%.2f".format(memInfo.totalMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
-        val backendLabel = if (isGpu) "GPU" else "CPU"
+        val backendLabel = when {
+            isNpu -> "NPU"
+            isGpu -> "GPU"
+            else -> "CPU"
+        }
         Log.i(TAG, "Hardware RAM check: MemTotal=${totalGb} GiB, requiredTier=${requiredGbLabel} GB (threshold=${"%.2f".format(minRequiredTierBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))} GiB), backend=$backendLabel")
 
         if (memInfo.totalMem < minRequiredTierBytes) {
@@ -293,18 +299,31 @@ object ModelSafetyValidator {
         val minRequiredAvailBytes = getMinRequiredAvailableRamBytes(
             preset = preset,
             isGpu = isGpu,
+            isNpu = isNpu,
             modelFile = modelFile,
             contextTurns = contextTurns
         )
 
-        if (memInfo.availMem < minRequiredAvailBytes) {
+        // Hard minimum required: at least working buffer headroom (KV cache + activations, minimum 350 MB)
+        // rather than blocking if available RAM doesn't include the entire mmap model file
+        val criticalBufferBytes = maxOf(350L * 1024L * 1024L, minRequiredAvailBytes - estimateModelSizeBytes(modelFile, preset))
+
+        if (memInfo.availMem < criticalBufferBytes) {
             val availGb = "%.2f".format(memInfo.availMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
-            val neededGb = "%.2f".format(minRequiredAvailBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
+            val neededGb = "%.2f".format(criticalBufferBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val backendLabel = if (isGpu) "GPU" else "CPU"
             return Result.failure(
                 IllegalStateException(
-                    "Low memory condition: Only ${availGb} GiB free RAM available right now. Initializing ${preset?.name ?: "model"} on $backendLabel requires at least ${neededGb} GiB free memory to avoid being killed by Android. Please close background apps and try again."
+                    "Low memory condition: Only ${availGb} GiB free RAM available right now. Initializing ${preset?.name ?: "model"} on $backendLabel requires at least ${neededGb} GiB working memory. Please close background apps and try again."
                 )
+            )
+        } else if (memInfo.availMem < minRequiredAvailBytes) {
+            val availGb = "%.2f".format(memInfo.availMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
+            val neededGb = "%.2f".format(minRequiredAvailBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
+            val backendLabel = if (isGpu) "GPU" else "CPU"
+            Log.w(
+                TAG,
+                "Available RAM (${availGb} GiB) is lower than nominal ideal (${neededGb} GiB) for ${preset?.name ?: "model"} on $backendLabel. Proceeding under memory pressure monitoring."
             )
         }
 
@@ -314,6 +333,10 @@ object ModelSafetyValidator {
     /**
      * Backwards-compatible overloads for CPU verification call sites.
      */
+    fun verifyDeviceRamForNpu(context: Context, preset: ModelPreset? = null, modelFile: File? = null, contextTurns: Int = 6): Result<Unit> {
+        return verifyDeviceRamForInference(context, preset, isGpu = false, isNpu = true, modelFile = modelFile, contextTurns = contextTurns)
+    }
+
     fun verifyDeviceRamForCpu(context: Context, preset: ModelPreset? = null, contextTurns: Int = 6): Result<Unit> {
         return verifyDeviceRamForInference(context, preset, isGpu = false, contextTurns = contextTurns)
     }
@@ -399,13 +422,20 @@ object ModelSafetyValidator {
 
     /**
      * Purges orphaned .tmp files and corrupted artifacts.
+     * When [maxAgeMs] > 0, active/resuming temporary downloads (.tmp / .part) newer than [maxAgeMs]
+     * are preserved to support HTTP 206 download resumption across app restarts.
+     * Zero-byte temp files are always purged.
      * Explicitly executed on Dispatchers.IO to prevent cold-start main-thread ANRs.
      */
-    suspend fun sweepCorruptedOrIncompleteArtifacts(storageDir: File): Int = withContext(Dispatchers.IO) {
+    suspend fun sweepCorruptedOrIncompleteArtifacts(
+        storageDir: File,
+        maxAgeMs: Long = 0L
+    ): Int = withContext(Dispatchers.IO) {
         var sweptCount = 0
         try {
             if (!storageDir.exists() || !storageDir.isDirectory) return@withContext 0
             val files = storageDir.listFiles() ?: return@withContext 0
+            val now = System.currentTimeMillis()
 
             for (file in files) {
                 if (!file.isFile) continue
@@ -413,9 +443,12 @@ object ModelSafetyValidator {
 
                 // Purge temporary downloads
                 if (name.endsWith(".tmp") || name.endsWith(".part")) {
-                    if (file.delete()) {
-                        sweptCount++
-                        Log.i(TAG, "Swept orphaned temporary download: ${file.name}")
+                    val isStaleOrEmpty = maxAgeMs <= 0L || file.length() == 0L || (now - file.lastModified()) > maxAgeMs
+                    if (isStaleOrEmpty) {
+                        if (file.delete()) {
+                            sweptCount++
+                            Log.i(TAG, "Swept orphaned temporary download: ${file.name}")
+                        }
                     }
                     continue
                 }

@@ -161,15 +161,16 @@ data class ModelPreset(
 
         fun isReasoningModel(modelId: String?): Boolean {
             if (modelId == null) return false
-            val preset = presetsById[modelId.lowercase()]
+            val preset = findByIdOrFileName(modelId)
             if (preset != null) return preset.isReasoningModel
             return modelId.contains("deepseek", ignoreCase = true) || 
-                   modelId.contains("qwq", ignoreCase = true)
+                   modelId.contains("qwq", ignoreCase = true) ||
+                   modelId.contains("r1", ignoreCase = true)
         }
 
         fun isKnownNonReasoningModel(modelId: String?): Boolean {
             if (modelId == null) return false
-            val preset = presetsById[modelId.lowercase()]
+            val preset = findByIdOrFileName(modelId)
             return preset != null && !preset.isReasoningModel
         }
 
@@ -301,7 +302,7 @@ data class ModelPreset(
                 supportsVision = true,
                 speedTier = ModelSpeedTier.BALANCED,
                 defaultThinkingEnabled = false,
-                tags = setOf(ModelTag.VISION, ModelTag.REASONING)
+                tags = setOf(ModelTag.VISION)
             ),
             ModelPreset(
                 id = "gemma4-e2b-uncensored",
@@ -386,7 +387,7 @@ data class ModelPreset(
                 supportsVision = true,
                 speedTier = ModelSpeedTier.POWER,
                 defaultThinkingEnabled = false,
-                tags = setOf(ModelTag.VISION, ModelTag.REASONING)
+                tags = setOf(ModelTag.VISION)
             )
         )
     }

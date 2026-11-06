@@ -349,6 +349,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
+                            modifier = Modifier.weight(1f).padding(end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -358,7 +359,7 @@ fun SettingsScreen(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = "🌐 Online Web Search (External Data Transmission)",
+                                text = "Online Web Search (External Data Transmission)",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -809,17 +810,20 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
+                    val isTensor = diagnostics.socInfo.vendor == SocVendor.GOOGLE_TENSOR
+                    val npuLabel = if (isTensor) "NPU Only (Google Tensor TPU)" else "NPU Only (Snapdragon Hexagon HTP)"
                     val backendOptions = listOf(
                         "AUTO" to "Auto (Recommended: NPU \u2192 GPU \u2192 CPU)",
                         "GPU_ONLY" to "GPU Only (Vulkan Acceleration)",
-                        "NPU_ONLY" to "NPU Only (Snapdragon Hexagon HTP)",
+                        "NPU_ONLY" to npuLabel,
                         "CPU_ONLY" to "CPU Only (Multithreaded Fallback)"
                     )
 
                     Column {
                         backendOptions.forEach { (backendKey, label) ->
                             val isNpuOption = backendKey == "NPU_ONLY"
-                            val isOptionAvailable = !isNpuOption || diagnostics.socInfo.isNpuHardwarePresent
+                            val hasNpu = diagnostics.socInfo.isNpuHardwarePresent || diagnostics.socInfo.isQnnRuntimeAvailable || isTensor
+                            val isOptionAvailable = !isNpuOption || hasNpu
 
                             Row(
                                 modifier = Modifier
@@ -844,15 +848,84 @@ fun SettingsScreen(
                                         color = if (isOptionAvailable) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                                         fontWeight = if (uiState.preferredBackend == backendKey) FontWeight.Bold else FontWeight.Normal
                                     )
-                                    if (isNpuOption && !diagnostics.socInfo.isNpuHardwarePresent) {
+                                    if (isNpuOption && !hasNpu) {
+                                        val npuUnavailableMsg = if (isTensor) "Tensor TPU runtime not available on this device" else "Snapdragon Hexagon HTP not detected on this device"
                                         Text(
-                                            text = "Snapdragon Hexagon HTP not detected on this device",
+                                            text = npuUnavailableMsg,
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                                         )
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    var npuCacheClearedMsg by remember { mutableStateOf(false) }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Auto-load on Launch",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Automatically reload your last active model upon opening the app. Disable to save startup RAM and reduce battery usage.",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                lineHeight = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Switch(
+                            checked = uiState.autoLoadModelOnStartup,
+                            onCheckedChange = { viewModel.setAutoLoadModelOnStartup(it) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Reset NPU Failure Cache",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (npuCacheClearedMsg) "NPU failure cache cleared! Models will retry NPU on next load."
+                                       else "Clear saved NPU error markers so models can re-attempt Hexagon/Tensor NPU initialization.",
+                                fontSize = 11.sp,
+                                color = if (npuCacheClearedMsg) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                lineHeight = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.resetNpuCache()
+                                npuCacheClearedMsg = true
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("Reset", fontSize = 12.sp)
                         }
                     }
                 }
@@ -1276,8 +1349,13 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            val subtitle = if (uiState.activeModelId != null) {
+                                "Currently active: ${uiState.activeModelId}. Allows reasoning models to output scratchpad thoughts."
+                            } else {
+                                "Allows reasoning models (e.g. DeepSeek-R1, Qwen Reasoning) to output scratchpad thoughts."
+                            }
                             Text(
-                                text = "Allows reasoning models (e.g. DeepSeek-R1, Qwen Reasoning) to output scratchpad thoughts.",
+                                text = subtitle,
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
