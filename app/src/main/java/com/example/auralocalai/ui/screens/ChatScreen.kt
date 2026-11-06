@@ -13,7 +13,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.AnnotatedString
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -33,10 +32,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Refresh
 import com.example.auralocalai.data.ChatSession
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Image
@@ -664,11 +661,11 @@ fun ChatScreen(
                 }
             }
 
-            // Follow streaming tokens in real time ONLY when user is already near bottom (no fighting manual scrolling)
+            // Follow streaming tokens in real time ONLY when user is already near bottom (anchors to bubble bottom for smooth scroll)
             val lastContentLength = uiState.messages.lastOrNull()?.content?.length ?: 0
             LaunchedEffect(lastContentLength) {
                 if (uiState.isGenerating && isAtBottom && uiState.messages.isNotEmpty()) {
-                    listState.scrollToItem(uiState.messages.size - 1)
+                    listState.scrollToItem(uiState.messages.size - 1, 100_000)
                 }
             }
 
@@ -1435,6 +1432,11 @@ fun parseThinkBlocks(rawContent: String): ParsedMessageContent {
     )
 }
 
+
+private val UserBubbleShape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
+private val AssistantBubbleShape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp)
+private val UserBubbleBorder = BorderStroke(0.dp, Color.Transparent)
+
 @Composable
 fun ChatBubble(
     message: ChatMessage,
@@ -1448,14 +1450,10 @@ fun ChatBubble(
     }
 
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
-    val shape = if (message.isUser) {
-        RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
-    } else {
-        RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp)
-    }
+    val shape = if (message.isUser) UserBubbleShape else AssistantBubbleShape
 
     val borderStroke = if (message.isUser) {
-        BorderStroke(0.dp, Color.Transparent)
+        UserBubbleBorder
     } else {
         BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     }
@@ -1600,7 +1598,7 @@ fun ChatBubble(
                 val parsed = if (!message.isUser && (isReasoningModel || hasThinkingTags(message.content))) {
                     remember(message.content) { parseThinkBlocks(message.content) }
                 } else {
-                    ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content)
+                    remember(message.content) { ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content) }
                 }
 
                 // Collapsible reasoning process accordion for DeepSeek-R1 CoT

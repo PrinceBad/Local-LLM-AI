@@ -1,12 +1,11 @@
 package com.example.auralocalai.ui.screens
 
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
@@ -31,19 +30,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.auralocalai.theme.ThemeMode
 import androidx.compose.ui.platform.LocalContext
-import android.content.pm.PackageManager
 import android.app.ActivityManager
 import android.os.Build
 import android.content.Context
-import java.io.File
 import com.example.auralocalai.ui.LlmViewModel
 import kotlinx.coroutines.launch
 
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Memory
 import com.example.auralocalai.data.SocDetector
 import com.example.auralocalai.data.SocInfo
-import com.example.auralocalai.data.HtpVersion
 import com.example.auralocalai.data.SocVendor
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,14 +97,14 @@ fun SettingsScreen(
         containerColor = MaterialTheme.colorScheme.background,
         modifier = modifier.fillMaxSize()
     ) { paddingValues ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .padding(paddingValues)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
             // Title Card with Info
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -146,6 +141,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // Main Token Settings Input Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -334,6 +332,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // Web Search Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -732,6 +733,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // Appearance Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -786,6 +790,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // Hardware Acceleration Backend Selector Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -811,14 +818,15 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     val isTensor = diagnostics.socInfo.vendor == SocVendor.GOOGLE_TENSOR
-                    val npuLabel = if (isTensor) "NPU Only (Google Tensor TPU)" else "NPU Only (Snapdragon Hexagon HTP)"
-                    val backendOptions = listOf(
-                        "AUTO" to "Auto (Recommended: NPU \u2192 GPU \u2192 CPU)",
-                        "GPU_ONLY" to "GPU Only (Vulkan Acceleration)",
-                        "NPU_ONLY" to npuLabel,
-                        "CPU_ONLY" to "CPU Only (Multithreaded Fallback)"
-                    )
-
+                    val backendOptions = remember(diagnostics.socInfo) {
+                        val npuLabel = if (isTensor) "NPU Only (Google Tensor TPU)" else "NPU Only (Snapdragon Hexagon HTP)"
+                        listOf(
+                            "AUTO" to "Auto (Recommended: NPU → GPU → CPU)",
+                            "GPU_ONLY" to "GPU Only (Vulkan Acceleration)",
+                            "NPU_ONLY" to npuLabel,
+                            "CPU_ONLY" to "CPU Only (Multithreaded Fallback)"
+                        )
+                    }
                     Column {
                         backendOptions.forEach { (backendKey, label) ->
                             val isNpuOption = backendKey == "NPU_ONLY"
@@ -931,6 +939,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // System Diagnostics Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1086,6 +1097,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // Chat Configuration Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1179,6 +1193,9 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
+            item {
             // 4. Model Inference & Sampling Parameters
             OutlinedCard(
                 shape = RoundedCornerShape(20.dp),
@@ -1389,21 +1406,28 @@ fun SettingsScreen(
                 }
             }
 
+            }
+
             // Footer / How to link
-            Text(
-                text = "Get your token by visiting Hugging Face settings page:",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-            Text(
-                text = "huggingface.co/settings/tokens",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Get your token by visiting Hugging Face settings page:",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "huggingface.co/settings/tokens",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
         }
     }
 }

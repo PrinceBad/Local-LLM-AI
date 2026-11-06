@@ -1,6 +1,5 @@
 package com.example.auralocalai.data
 
-import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build

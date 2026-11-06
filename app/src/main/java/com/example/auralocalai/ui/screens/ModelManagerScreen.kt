@@ -8,7 +8,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import com.example.auralocalai.theme.DarkSuccess
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,10 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.auralocalai.data.DownloadState
@@ -188,7 +184,7 @@ fun ModelManagerScreen(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        ModelPresetCategory.values().forEach { cat ->
+                        ModelPresetCategory.entries.forEach { cat ->
                             val isSelected = selectedCategory == cat
                             FilterChip(
                                 selected = isSelected,
@@ -505,7 +501,7 @@ fun PresetModelCard(
                         }
 
                         // RAM requirement Pill tag (clean without duplicate RAM:)
-                        val cleanRam = preset.ramRequirement.replace("RAM:", "").replace("RAM", "").trim()
+                        val cleanRam = remember(preset.ramRequirement) { preset.ramRequirement.replace("RAM:", "").replace("RAM", "").trim() }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))

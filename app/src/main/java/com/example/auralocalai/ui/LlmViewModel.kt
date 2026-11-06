@@ -14,7 +14,6 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.auralocalai.data.DownloadState
-import com.example.auralocalai.data.LlmBackendRestriction
 import com.example.auralocalai.data.LlmInferenceEngine
 import com.example.auralocalai.data.ModelDownloader
 import com.example.auralocalai.data.ModelDownloadService
@@ -59,8 +58,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
