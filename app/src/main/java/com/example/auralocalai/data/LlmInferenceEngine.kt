@@ -259,7 +259,7 @@ class LlmInferenceEngine(private val context: Context) {
                 if (gpuRamCheck.isFailure) {
                     val ramError = gpuRamCheck.exceptionOrNull() ?: Exception("Insufficient available RAM for GPU initialization")
                     android.util.Log.w("LlmInferenceEngine", "GPU RAM check failed: ${ramError.message}")
-                    if (restriction == LlmBackendRestriction.GPU_ONLY || preferredBackend == "GPU_ONLY") {
+                    if (preferredBackend == "GPU_ONLY" || (restriction == LlmBackendRestriction.GPU_ONLY && preferredBackend != "AUTO")) {
                         return@withContext Result.failure(ramError)
                     }
                     gpuError = ramError
@@ -305,8 +305,8 @@ class LlmInferenceEngine(private val context: Context) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
                         gpuError = e
                         android.util.Log.w("LlmInferenceEngine", "GPU initialization failed or timed out: ${e.message}")
-                        // If CPU fallback is NOT allowed or GPU_ONLY is preferred, fail immediately
-                        if (restriction == LlmBackendRestriction.GPU_ONLY || preferredBackend == "GPU_ONLY") {
+                        // In AUTO mode, always attempt CPU fallback if GPU fails; fail immediately only if GPU_ONLY was explicitly chosen
+                        if (preferredBackend == "GPU_ONLY" || (restriction == LlmBackendRestriction.GPU_ONLY && preferredBackend != "AUTO")) {
                             val msg = "GPU failed: ${e.localizedMessage}. Backend restriction ($restriction) or preference ($preferredBackend) prevents fallback."
                             return@withContext Result.failure(Exception(msg, e))
                         }
@@ -472,8 +472,9 @@ class LlmInferenceEngine(private val context: Context) {
             // STEP 3: Attempt CPU fallback
             // ============================================================
             if (!loaded) {
+                // In AUTO mode, always attempt CPU fallback if GPU failed/timed out, regardless of default model metadata constraints
                 val attemptCpu = (preferredBackend == "AUTO" || preferredBackend == "CPU_ONLY") &&
-                    (restriction == LlmBackendRestriction.CPU_ONLY || restriction == LlmBackendRestriction.ANY)
+                    (preferredBackend == "AUTO" || restriction == LlmBackendRestriction.CPU_ONLY || restriction == LlmBackendRestriction.ANY)
                 if (attemptCpu) {
                     val stageMsg = if (gpuError != null) "GPU unavailable \u2014 checking device RAM for CPU fallback\u2026" else "Checking device RAM for CPU execution\u2026"
                     onStageUpdate?.invoke(stageMsg)

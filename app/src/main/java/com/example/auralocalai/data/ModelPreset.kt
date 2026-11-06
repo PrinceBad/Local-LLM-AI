@@ -150,7 +150,13 @@ data class ModelPreset(
         }
 
         val presetsByFileName: Map<String, ModelPreset> by lazy {
-            presets.associateBy { it.fileName.lowercase() }
+            val map = HashMap<String, ModelPreset>()
+            for (p in presets) {
+                map[p.fileName.lowercase()] = p
+                val urlName = p.downloadUrl.substringAfterLast('/').lowercase()
+                map[urlName] = p
+            }
+            map
         }
 
         fun findByIdOrFileName(identifier: String?): ModelPreset? {
@@ -159,12 +165,13 @@ data class ModelPreset(
             val direct = presetsById[lower] ?: presetsByFileName[lower]
             if (direct != null) return direct
 
-            val normalizedTarget = lower.replace("-", "").replace("_", "").replace(".litertlm", "").replace(".task", "")
+            val normalizedTarget = lower.replace("-", "").replace("_", "").replace(".", "").replace("litertlm", "").replace("task", "")
             return presets.firstOrNull { preset ->
-                val pIdNorm = preset.id.lowercase().replace("-", "").replace("_", "")
-                val pFileNorm = preset.fileName.lowercase().replace("-", "").replace("_", "").replace(".litertlm", "").replace(".task", "")
-                pIdNorm == normalizedTarget || pFileNorm == normalizedTarget ||
-                    normalizedTarget.startsWith(pIdNorm) || normalizedTarget.startsWith(pFileNorm)
+                val pIdNorm = preset.id.lowercase().replace("-", "").replace("_", "").replace(".", "")
+                val pFileNorm = preset.fileName.lowercase().replace("-", "").replace("_", "").replace(".", "").replace("litertlm", "").replace("task", "")
+                val urlNorm = preset.downloadUrl.substringAfterLast('/').lowercase().replace("-", "").replace("_", "").replace(".", "").replace("litertlm", "").replace("task", "")
+                pIdNorm == normalizedTarget || pFileNorm == normalizedTarget || urlNorm == normalizedTarget ||
+                    normalizedTarget.startsWith(pIdNorm) || normalizedTarget.startsWith(pFileNorm) || normalizedTarget.contains(pIdNorm)
             }
         }
 
