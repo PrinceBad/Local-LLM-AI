@@ -901,6 +901,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         fun stripThinkingBlocks(rawContent: String): String {
             return rawContent
+                .replace(Regex("""<\|think\|>[\s\S]*?(<\|/think\|>|<\|end_of_thought\|>|</think>|\Z)""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""<thought>[\s\S]*?(</thought>|\Z)""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""<think>[\s\S]*?(</think>|\Z)""", RegexOption.IGNORE_CASE), "")
                 .trim()
         }
@@ -913,6 +915,9 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
             val lower = raw.lowercase()
             return when {
+                lower.contains("vision executor") || lower.contains("tryloadingvisionexecutor") ->
+                    "The model's native vision executor encountered a temporary pipeline issue with this attachment. Please retry or submit as text."
+
                 // Conversation lifecycle
                 lower.contains("conversation is not alive") || lower.contains("not alive") ->
                     "Conversation session was reset. Please try sending your message again."
@@ -1629,7 +1634,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         tokenCount++
                         accumulatedBuilder.append(partialToken)
                         val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastUpdateTime > 100) {
+                        if (currentTime - lastUpdateTime > 45) {
                             val currentSnapshot = accumulatedBuilder.toString()
                             _uiState.update { state ->
                                 val updatedMessages = ArrayList(state.messages)

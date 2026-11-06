@@ -19,6 +19,8 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.RepetitionPenaltyConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
+import com.google.ai.edge.litertlm.SpeculativeDecodingConfig
+import com.google.ai.edge.litertlm.SpeculativeDecodingMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -231,16 +233,19 @@ class LlmInferenceEngine(private val context: Context) {
             val maxTokensByTurns = (contextTurns * 384).coerceIn(1536, 4096)
             val effectiveMaxTokens = minOf(detectedMaxContextTokens.takeIf { it > 0 } ?: 4096, maxTokensByTurns)
             val modelSupportsVision = detectedSupportsVision || (preset?.supportsVision == true)
+            val threadCount = detectBigCoreThreadCount()
+            // Always route vision encoding graph to CPU (XNNPACK) with big-core parallelism.
+            // On mobile devices (e.g. Adreno 610/619/680/685) and models with CPU backend constraints on vision adapters
+            // (e.g. Gemma 4 E2B/E4B), GPU vision allocation fails or leaves vision executor null.
+            // CPU XNNPACK guarantees 100% stable vision loading while keeping text decoder accelerated on GPU.
+            val visionBackendToUse = if (modelSupportsVision) Backend.CPU(threadCount) else null
 
             // ============================================================
             // STEP 1: Attempt GPU initialization (Vulkan) - Primary acceleration in AUTO mode
             // ============================================================
-            val isLowTierGpu = SocDetector.shouldDefaultToCpu(context)
-            val attemptGpu = (preferredBackend == "GPU_ONLY" || (preferredBackend == "AUTO" && !isLowTierGpu)) &&
+            // In AUTO mode, always attempt GPU first as requested; fallback to CPU only if GPU fails or times out.
+            val attemptGpu = (preferredBackend == "GPU_ONLY" || preferredBackend == "AUTO") &&
                 (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.GPU_ONLY)
-            if (preferredBackend == "AUTO" && isLowTierGpu) {
-                android.util.Log.i("LlmInferenceEngine", "Entry-level GPU detected (e.g. Snapdragon 685 / Adreno 610). In AUTO mode, bypassing 75s GPU shader compilation to use high-performance CPU (XNNPACK) directly.")
-            }
             if (attemptGpu) {
                 // Pre-flight GPU RAM guard: accounts for weight staging & Android Vulkan buffer duplication (LiteRT-LM #3507)
                 val gpuRamCheck = ModelSafetyValidator.verifyDeviceRamForInference(
@@ -265,10 +270,11 @@ class LlmInferenceEngine(private val context: Context) {
                         val config = EngineConfig(
                             modelPath = modelPath,
                             backend = Backend.GPU(),
-                            visionBackend = if (modelSupportsVision) Backend.GPU() else null,
+                            visionBackend = visionBackendToUse,
                             cacheDir = getCompiledCacheDir().absolutePath,
                             maxNumTokens = effectiveMaxTokens,
-                            maxNumImages = if (modelSupportsVision) 1 else null
+                            maxNumImages = if (modelSupportsVision) 1 else null,
+                            speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
                         )
                         if (preferredBackend == "AUTO") {
                             val initOk = kotlinx.coroutines.withTimeoutOrNull(75_000L) {
@@ -382,10 +388,11 @@ class LlmInferenceEngine(private val context: Context) {
                                 val config = EngineConfig(
                                     modelPath = modelPath,
                                     backend = Backend.GOOGLE_TENSOR(),
-                                    visionBackend = if (modelSupportsVision) Backend.GOOGLE_TENSOR() else null,
+                                    visionBackend = visionBackendToUse,
                                     cacheDir = getCompiledCacheDir().absolutePath,
                                     maxNumTokens = effectiveMaxTokens,
-                                    maxNumImages = if (modelSupportsVision) 1 else null
+                                    maxNumImages = if (modelSupportsVision) 1 else null,
+                                    speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
                                 )
                                 val eng = Engine(config)
                                 tempTensorEngine = eng
@@ -426,10 +433,11 @@ class LlmInferenceEngine(private val context: Context) {
                                 val config = EngineConfig(
                                     modelPath = modelPath,
                                     backend = Backend.NPU(nativeLibraryDir = nativeLibDir),
-                                    visionBackend = if (modelSupportsVision) Backend.NPU(nativeLibraryDir = nativeLibDir) else null,
+                                    visionBackend = visionBackendToUse,
                                     cacheDir = getCompiledCacheDir().absolutePath,
                                     maxNumTokens = effectiveMaxTokens,
-                                    maxNumImages = if (modelSupportsVision) 1 else null
+                                    maxNumImages = if (modelSupportsVision) 1 else null,
+                                    speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
                                 )
                                 val eng = Engine(config)
                                 tempQnnEngine = eng
@@ -479,14 +487,14 @@ class LlmInferenceEngine(private val context: Context) {
                     onStageUpdate?.invoke("Initializing CPU backend\u2026")
                     var tempCpuEngine: Engine? = null
                     try {
-                        val threadCount = detectBigCoreThreadCount()
                         val config = EngineConfig(
                             modelPath = modelPath,
                             backend = Backend.CPU(threadCount),
-                            visionBackend = if (modelSupportsVision) Backend.CPU(threadCount) else null,
+                            visionBackend = visionBackendToUse,
                             cacheDir = getCompiledCacheDir().absolutePath,
                             maxNumTokens = effectiveMaxTokens,
-                            maxNumImages = if (modelSupportsVision) 1 else null
+                            maxNumImages = if (modelSupportsVision) 1 else null,
+                            speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
                         )
                         val eng = Engine(config)
                         tempCpuEngine = eng
@@ -571,7 +579,9 @@ class LlmInferenceEngine(private val context: Context) {
         val instruction = systemPrompt?.takeIf { it.isNotBlank() }
         val template = if (isChatMlOrQwenModel(currentModelPath)) QWEN_CHATML_TEMPLATE else null
         val defaultThinking = currentModelPath?.let { ModelPreset.findByIdOrFileName(File(it).name)?.defaultThinkingEnabled } ?: false
-        val effectiveThinking = if (detectedSupportsThinking) (thinkingConfig ?: ThinkingConfig(enableThinking = defaultThinking)) else null
+        val effectiveThinking = if (detectedSupportsThinking) {
+            thinkingConfig ?: ThinkingConfig(enableThinking = defaultThinking, thinkingTokenBudget = -1)
+        } else null
         val config = ConversationConfig(
             systemInstruction = instruction?.let { Contents.of(it) },
             initialMessages = initialHistory,
@@ -651,17 +661,16 @@ class LlmInferenceEngine(private val context: Context) {
             val effectiveThinkingConfig = if (detectedSupportsThinking) {
                 val defaultThinking = currentModelPath?.let { ModelPreset.findByIdOrFileName(File(it).name)?.defaultThinkingEnabled } ?: false
                 val req = turnThinkingConfig ?: this@LlmInferenceEngine.thinkingConfig ?: ThinkingConfig(enableThinking = defaultThinking)
-                // If thinking is enabled, clamp budget to min(1024, context / 3) for all thinking-capable models
                 if (req.enableThinking) {
-                    val maxBudget = if (detectedMaxContextTokens > 0) {
-                        minOf(1024, detectedMaxContextTokens / 3)
+                    val budgetedTokens = if (req.thinkingTokenBudget > 0) {
+                        val maxBudget = if (detectedMaxContextTokens > 0) minOf(2048, detectedMaxContextTokens / 3) else 1024
+                        req.thinkingTokenBudget.coerceAtMost(maxBudget)
                     } else {
-                        512
+                        -1 // Unconstrained native reasoning
                     }
-                    val budgetedTokens = if (req.thinkingTokenBudget in 1..maxBudget) req.thinkingTokenBudget else maxBudget
                     ThinkingConfig(enableThinking = true, thinkingTokenBudget = budgetedTokens)
                 } else {
-                    req
+                    ThinkingConfig(enableThinking = false)
                 }
             } else {
                 null
@@ -710,7 +719,24 @@ class LlmInferenceEngine(private val context: Context) {
                     val isDead = convEx is IllegalStateException ||
                         msg.contains("not alive", ignoreCase = true) ||
                         msg.contains("is closed", ignoreCase = true)
-                    if (isDead && engine != null) {
+                    val isVisionFail = image != null && (msg.contains("Vision executor", ignoreCase = true) || msg.contains("TryLoadingVisionExecutor", ignoreCase = true))
+                    if (isVisionFail) {
+                        android.util.Log.w("LlmInferenceEngine", "Vision execution failed on native runtime ($msg); auto-falling back to text-only turn.")
+                        val textMessage = Message.user(prompt)
+                        currentConversation.sendMessageAsync(
+                            message = textMessage,
+                            repetitionPenaltyConfig = repetitionPenaltyConfig,
+                            thinkingConfig = effectiveThinkingConfig
+                        )
+                            .flowOn(Dispatchers.Default)
+                            .collect { chunk ->
+                                val text = chunk.toString()
+                                if (text.isNotEmpty()) {
+                                    trySend(text)
+                                }
+                            }
+                        turnCompletedNormally = true
+                    } else if (isDead && engine != null) {
                         android.util.Log.w("LlmInferenceEngine", "Native conversation not alive; auto-recovering with fresh conversation context.")
                         try { currentConversation.close() } catch (_: Throwable) {}
                         val freshConv = newConversation(engine!!)
@@ -844,17 +870,18 @@ class LlmInferenceEngine(private val context: Context) {
             if (maxFreqs.isNotEmpty()) {
                 val medianFreq = maxFreqs.sorted()[maxFreqs.size / 2]
                 val bigCores = maxFreqs.count { it >= medianFreq }
-                bigCores.coerceIn(2, 4)
+                bigCores.coerceIn(2, 6)
             } else {
-                if (available >= 8) 4 else 2
+                if (available >= 8) minOf(6, available - 2) else maxOf(2, available / 2)
             }
         } catch (_: Throwable) {
-            if (Runtime.getRuntime().availableProcessors() >= 8) 4 else 2
+            val available = Runtime.getRuntime().availableProcessors()
+            if (available >= 8) minOf(6, available - 2) else 2
         }
     }
 
     companion object {
-        const val NPU_CACHE_VERSION = "v2.6_litertlm"
+        const val NPU_CACHE_VERSION = "v3.0_litertlm"
 
         /**
          * Qwen / ChatML Jinja template that handles sequence-based message content

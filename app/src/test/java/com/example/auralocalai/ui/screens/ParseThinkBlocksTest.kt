@@ -111,6 +111,30 @@ class ParseThinkBlocksTest {
 
         val noThink = "Simple prompt without any reasoning tags."
         assertEquals("Simple prompt without any reasoning tags.", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(noThink))
+
+        val gemmaRaw = "<|think|>Gemma reasoning internal step.<|/think|>Answer text."
+        assertEquals("Answer text.", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(gemmaRaw))
+
+        val thoughtRaw = "<thought>Thought internal step.</thought>Answer text."
+        assertEquals("Answer text.", com.example.auralocalai.ui.LlmViewModel.stripThinkingBlocks(thoughtRaw))
+    }
+
+    @Test
+    fun testGemmaStyleThinkBlock() {
+        val raw = "<|think|>Internal thought tokens here.<|/think|>The user solution."
+        val result = parseThinkBlocks(raw)
+        assertEquals("Internal thought tokens here.", result.thinkContent)
+        assertFalse(result.hasUnclosedThink)
+        assertEquals("The user solution.", result.mainContent)
+    }
+
+    @Test
+    fun testThoughtTagBlock() {
+        val raw = "<thought>Step by step reasoning.</thought>Final output."
+        val result = parseThinkBlocks(raw)
+        assertEquals("Step by step reasoning.", result.thinkContent)
+        assertFalse(result.hasUnclosedThink)
+        assertEquals("Final output.", result.mainContent)
     }
 
     @Test

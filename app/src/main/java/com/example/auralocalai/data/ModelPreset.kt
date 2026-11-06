@@ -155,8 +155,17 @@ data class ModelPreset(
 
         fun findByIdOrFileName(identifier: String?): ModelPreset? {
             if (identifier == null) return null
-            val lower = identifier.lowercase()
-            return presetsById[lower] ?: presetsByFileName[lower]
+            val lower = identifier.lowercase().trim()
+            val direct = presetsById[lower] ?: presetsByFileName[lower]
+            if (direct != null) return direct
+
+            val normalizedTarget = lower.replace("-", "").replace("_", "").replace(".litertlm", "").replace(".task", "")
+            return presets.firstOrNull { preset ->
+                val pIdNorm = preset.id.lowercase().replace("-", "").replace("_", "")
+                val pFileNorm = preset.fileName.lowercase().replace("-", "").replace("_", "").replace(".litertlm", "").replace(".task", "")
+                pIdNorm == normalizedTarget || pFileNorm == normalizedTarget ||
+                    normalizedTarget.startsWith(pIdNorm) || normalizedTarget.startsWith(pFileNorm)
+            }
         }
 
         fun isReasoningModel(modelId: String?): Boolean {

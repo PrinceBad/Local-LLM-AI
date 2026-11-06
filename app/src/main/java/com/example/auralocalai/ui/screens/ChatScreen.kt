@@ -710,12 +710,12 @@ fun ChatScreen(
                                     ModelPreset.isKnownNonReasoningModel(message.modelId) -> false
                                     // 2. Catalog reasoning models (DeepSeek-R1, QwQ): always treat as reasoning
                                     ModelPreset.isReasoningModel(message.modelId) -> true
-                                    // 3. Custom imported models: gate strictly on confirmed full tag prefix
-                                    else -> message.content.trimStart().startsWith("<think>")
+                                    // 3. Custom imported models: gate strictly on confirmed thinking tags
+                                    else -> hasThinkingTags(message.content)
                                 }
                             } else {
-                                // 4. Legacy history: decouple from active model; gate strictly on confirmed full tag prefix
-                                message.content.trimStart().startsWith("<think>")
+                                // 4. Legacy history: decouple from active model; gate strictly on confirmed thinking tags
+                                hasThinkingTags(message.content)
                             }
                         }
 
@@ -1313,24 +1313,56 @@ data class ParsedMessageContent(
     val mainContent: String
 )
 
-// Single-pass fast path for the predominant single-think-block reasoning model case
-fun parseThinkBlocks(rawContent: String): ParsedMessageContent {
-    val thinkStartTag = "<think>"
-    val thinkEndTag = "</think>"
+fun hasThinkingTags(raw: String): Boolean {
+    return raw.contains("<think>", ignoreCase = true) ||
+           raw.contains("<|think|>", ignoreCase = true) ||
+           raw.contains("<thought>", ignoreCase = true)
+}
 
-    val firstStartIndex = rawContent.indexOf(thinkStartTag)
-    if (firstStartIndex == -1) {
+private val THINK_START_TAGS = listOf("<think>", "<|think|>", "<thought>")
+private val THINK_END_TAGS = listOf("</think>", "<|/think|>", "<|end_of_thought|>", "</thought>")
+
+// Fast-path and comprehensive support for reasoning model think tags:
+// Supports <think>...</think>, <|think|>...</|think|>, <|think|>...</think>, <thought>...</thought>
+fun parseThinkBlocks(rawContent: String): ParsedMessageContent {
+    var earliestStartIdx = -1
+    var matchedStartTag = ""
+    for (tag in THINK_START_TAGS) {
+        val idx = rawContent.indexOf(tag, ignoreCase = true)
+        if (idx != -1 && (earliestStartIdx == -1 || idx < earliestStartIdx)) {
+            earliestStartIdx = idx
+            matchedStartTag = rawContent.substring(idx, idx + tag.length)
+        }
+    }
+
+    if (earliestStartIdx == -1) {
         return ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = rawContent)
     }
 
-    // Fast-path: single think block (covers DeepSeek-R1, QwQ, etc. without list allocations)
-    val secondStartIndex = rawContent.indexOf(thinkStartTag, firstStartIndex + thinkStartTag.length)
-    if (secondStartIndex == -1) {
-        val before = rawContent.substring(0, firstStartIndex).trim()
-        val endIndex = rawContent.indexOf(thinkEndTag, firstStartIndex + thinkStartTag.length)
-        return if (endIndex != -1) {
-            val thinkText = rawContent.substring(firstStartIndex + thinkStartTag.length, endIndex).trim().ifEmpty { null }
-            val after = rawContent.substring(endIndex + thinkEndTag.length).trim()
+    val searchAfterFirst = earliestStartIdx + matchedStartTag.length
+    var hasSecondStart = false
+    for (tag in THINK_START_TAGS) {
+        if (rawContent.indexOf(tag, searchAfterFirst, ignoreCase = true) != -1) {
+            hasSecondStart = true
+            break
+        }
+    }
+
+    if (!hasSecondStart) {
+        val before = rawContent.substring(0, earliestStartIdx).trim()
+        var earliestEndIdx = -1
+        var matchedEndTagLen = 0
+        for (endTag in THINK_END_TAGS) {
+            val endIdx = rawContent.indexOf(endTag, searchAfterFirst, ignoreCase = true)
+            if (endIdx != -1 && (earliestEndIdx == -1 || endIdx < earliestEndIdx)) {
+                earliestEndIdx = endIdx
+                matchedEndTagLen = endTag.length
+            }
+        }
+
+        return if (earliestEndIdx != -1) {
+            val thinkText = rawContent.substring(searchAfterFirst, earliestEndIdx).trim().ifEmpty { null }
+            val after = rawContent.substring(earliestEndIdx + matchedEndTagLen).trim()
             val main = when {
                 before.isEmpty() -> after
                 after.isEmpty() -> before
@@ -1338,35 +1370,54 @@ fun parseThinkBlocks(rawContent: String): ParsedMessageContent {
             }
             ParsedMessageContent(thinkContent = thinkText, hasUnclosedThink = false, mainContent = main)
         } else {
-            val unclosedThink = rawContent.substring(firstStartIndex + thinkStartTag.length).trim().ifEmpty { null }
+            val unclosedThink = rawContent.substring(searchAfterFirst).trim().ifEmpty { null }
             ParsedMessageContent(thinkContent = unclosedThink, hasUnclosedThink = true, mainContent = before)
         }
     }
 
-    // Fallback: multiple interleaved think blocks
+    // Multiple interleaved think blocks
     val thinkBlocks = mutableListOf<String>()
     val mainBlocks = mutableListOf<String>()
     var currIndex = 0
     var hasUnclosed = false
 
     while (currIndex < rawContent.length) {
-        val startIndex = rawContent.indexOf(thinkStartTag, currIndex)
-        if (startIndex == -1) {
+        var startIdx = -1
+        var startTagLen = 0
+        for (tag in THINK_START_TAGS) {
+            val idx = rawContent.indexOf(tag, currIndex, ignoreCase = true)
+            if (idx != -1 && (startIdx == -1 || idx < startIdx)) {
+                startIdx = idx
+                startTagLen = tag.length
+            }
+        }
+
+        if (startIdx == -1) {
             val remaining = rawContent.substring(currIndex).trim()
             if (remaining.isNotEmpty()) mainBlocks.add(remaining)
             break
         }
 
-        val before = rawContent.substring(currIndex, startIndex).trim()
+        val before = rawContent.substring(currIndex, startIdx).trim()
         if (before.isNotEmpty()) mainBlocks.add(before)
 
-        val endIndex = rawContent.indexOf(thinkEndTag, startIndex + thinkStartTag.length)
-        if (endIndex != -1) {
-            val thinkText = rawContent.substring(startIndex + thinkStartTag.length, endIndex).trim()
+        val afterStart = startIdx + startTagLen
+        var endIdx = -1
+        var endTagLen = 0
+        for (endTag in THINK_END_TAGS) {
+            val idx = rawContent.indexOf(endTag, afterStart, ignoreCase = true)
+            if (idx != -1 && (endIdx == -1 || idx < endIdx)) {
+                endIdx = idx
+                endTagLen = endTag.length
+            }
+        }
+
+        if (endIdx != -1) {
+            val thinkText = rawContent.substring(afterStart, endIdx).trim()
             if (thinkText.isNotEmpty()) thinkBlocks.add(thinkText)
-            currIndex = endIndex + thinkEndTag.length
+            currIndex = endIdx + endTagLen
         } else {
-            val unclosedThink = rawContent.substring(startIndex + thinkStartTag.length).trim()
+            val unclosedThink = rawContent.substring(afterStart).trim()
             if (unclosedThink.isNotEmpty()) thinkBlocks.add(unclosedThink)
             hasUnclosed = true
             currIndex = rawContent.length
@@ -1546,7 +1597,7 @@ fun ChatBubble(
 
                 // Parse think blocks only for AI assistant messages from reasoning models
                 // TODO: consider incremental parsing from last known offset if this shows up in profiling
-                val parsed = if (!message.isUser && (isReasoningModel || message.content.contains("<think>"))) {
+                val parsed = if (!message.isUser && (isReasoningModel || hasThinkingTags(message.content))) {
                     remember(message.content) { parseThinkBlocks(message.content) }
                 } else {
                     ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content)
