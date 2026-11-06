@@ -122,6 +122,8 @@ class ParseThinkBlocksTest {
         assertFalse(ModelPreset.isKnownNonReasoningModel("deepseek-r1-7b"))
 
         // 2. Catalog known non-reasoning models
+        assertFalse(ModelPreset.isReasoningModel("smollm2-1.7b"))
+        assertTrue(ModelPreset.isKnownNonReasoningModel("smollm2-1.7b"))
         assertFalse(ModelPreset.isReasoningModel("qwen2.5-coder-1.5b"))
         assertTrue(ModelPreset.isKnownNonReasoningModel("qwen2.5-coder-1.5b"))
         assertFalse(ModelPreset.isReasoningModel("gemma4-e2b"))

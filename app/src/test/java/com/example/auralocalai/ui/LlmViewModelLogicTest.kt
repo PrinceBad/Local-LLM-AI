@@ -94,9 +94,9 @@ class LlmViewModelLogicTest {
             if (preset.id.startsWith("qwen3")) {
                 assertFalse("Qwen3 models must default thinking to false", preset.defaultThinkingEnabled)
             }
-            // Check DeepSeek thinking default is true
-            if (preset.id == "deepseek-1.5b") {
-                assertTrue("DeepSeek R1 must default thinking to true", preset.defaultThinkingEnabled)
+            // Check SmolLM2 thinking default is false
+            if (preset.id == "smollm2-1.7b") {
+                assertFalse("SmolLM2 must default thinking to false", preset.defaultThinkingEnabled)
             }
         }
     }

@@ -143,16 +143,16 @@ class TelemetryBenchmarkTest {
         assertFalse(coder15.supportsVision)
         assertTrue(coder15.tags.contains(com.example.auralocalai.data.ModelTag.CODING))
 
-        // 5. DeepSeek R1 1.5B
-        val deepseek = presets.first { it.id == "deepseek-1.5b" }
-        assertEquals("Q8 (8-bit)", deepseek.quantization)
-        assertEquals("1.5B", deepseek.parameterCount)
-        assertEquals(6, deepseek.minRamGb)
-        assertEquals("6 GB+ RAM", deepseek.ramRequirement)
-        assertEquals(1833451520L, deepseek.sizeBytes)
-        assertTrue(deepseek.isReasoningModel)
-        assertTrue(deepseek.defaultThinkingEnabled)
-        assertFalse(deepseek.supportsVision)
+        // 5. SmolLM2 1.7B
+        val smollm2 = presets.first { it.id == "smollm2-1.7b" }
+        assertEquals("dynamic INT8", smollm2.quantization)
+        assertEquals("1.7B", smollm2.parameterCount)
+        assertEquals(4, smollm2.minRamGb)
+        assertEquals("4 GB+ RAM", smollm2.ramRequirement)
+        assertEquals(1730949280L, smollm2.sizeBytes)
+        assertFalse(smollm2.isReasoningModel)
+        assertFalse(smollm2.defaultThinkingEnabled)
+        assertFalse(smollm2.supportsVision)
 
         // 6. Gemma 4 E2B (Multimodal Vision)
         val gemmaE2b = presets.first { it.id == "gemma4-e2b" }
@@ -212,7 +212,7 @@ class TelemetryBenchmarkTest {
         assertEquals(4096, qwen15.effectiveContextTokens)
         assertEquals(4096, qwen17.effectiveContextTokens)
         assertEquals(4096, coder15.effectiveContextTokens)
-        assertEquals(4096, deepseek.effectiveContextTokens)
+        assertEquals(4096, smollm2.effectiveContextTokens)
         assertEquals(8192, gemmaE2b.effectiveContextTokens)
         assertEquals(8192, gemmaUncensored.effectiveContextTokens)
         assertEquals(8192, supergemma.effectiveContextTokens)

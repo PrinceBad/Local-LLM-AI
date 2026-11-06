@@ -641,7 +641,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     fun validateHfToken(token: String, callback: (Boolean, String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val testUrl = "https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm"
+                val testUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm"
                 val result = downloader.validateTokenAccess(testUrl, token)
                 if (result == "OK") {
                     callback(true, "Token is valid!")

@@ -885,14 +885,14 @@ class LlmInferenceEngine(private val context: Context) {
             if (path == null) return false
             val file = File(path)
             val lowerName = file.name.lowercase()
-            if (lowerName.contains("qwen") || lowerName.contains("deepseek") || lowerName.contains("chatml") || lowerName.contains("qwq")) {
+            if (lowerName.contains("qwen") || lowerName.contains("smollm") || lowerName.contains("deepseek") || lowerName.contains("chatml") || lowerName.contains("qwq")) {
                 return true
             }
             val preset = ModelPreset.findByIdOrFileName(file.name)
             if (preset != null) {
                 val pId = preset.id.lowercase()
                 val pFile = preset.fileName.lowercase()
-                if (pId.contains("qwen") || pId.contains("deepseek") || pFile.contains("qwen") || pFile.contains("deepseek")) {
+                if (pId.contains("qwen") || pId.contains("smollm") || pId.contains("deepseek") || pFile.contains("qwen") || pFile.contains("smollm") || pFile.contains("deepseek")) {
                     return true
                 }
             }
