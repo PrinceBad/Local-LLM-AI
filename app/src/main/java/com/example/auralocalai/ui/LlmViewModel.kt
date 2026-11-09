@@ -964,6 +964,10 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 lower.contains("vk_error") ->
                     "Vulkan GPU error: ${raw.take(200)}. Try switching to CPU in Settings."
 
+                // Older Qwen 0.6B mixed_int4 legacy error
+                lower.contains("qwen3_0_6b_mixed_int4") || (lower.contains("qwen3") && lower.contains("mixed_int4")) ->
+                    "This older Qwen 0.6B download lacks CPU kernels and cannot run on this GPU. Please delete it in Manage Models and download the updated 343 MB Turbo model."
+
                 // Backend restriction to GPU only
                 (lower.contains("backend restriction") || lower.contains("gpu_only")) && lower.contains("gpu_only") ->
                     "This model requires Vulkan GPU acceleration. Check your GPU backend settings."

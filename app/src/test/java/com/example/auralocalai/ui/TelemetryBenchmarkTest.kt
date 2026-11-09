@@ -97,11 +97,11 @@ class TelemetryBenchmarkTest {
 
         // 1. Qwen 3 0.6B (Pocket Turbo)
         val qwen06 = presets.first { it.id == "qwen3-0.6b" }
-        assertEquals("mixed INT4", qwen06.quantization)
+        assertEquals("dynamic INT4", qwen06.quantization)
         assertEquals("0.6B", qwen06.parameterCount)
         assertEquals(2, qwen06.minRamGb)
         assertEquals("2 GB+ RAM", qwen06.ramRequirement)
-        assertEquals(497516544L, qwen06.sizeBytes)
+        assertEquals(343490560L, qwen06.sizeBytes)
         assertEquals(com.example.auralocalai.data.ModelSpeedTier.TURBO, qwen06.speedTier)
         assertTrue(qwen06.isReasoningModel)
         assertFalse(qwen06.defaultThinkingEnabled)

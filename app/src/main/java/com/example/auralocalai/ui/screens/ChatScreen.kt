@@ -95,7 +95,7 @@ fun ChatScreen(
     var showRenameDialog by remember { mutableStateOf<ChatSession?>(null) }
     var renameTitleInput by remember { mutableStateOf("") }
     var sessionToDelete by remember { mutableStateOf<ChatSession?>(null) }
-    var textInput by remember { mutableStateOf("") }
+    val textInputState = remember { mutableStateOf("") }
     val context = LocalContext.current
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showSearchDisclosureDialog by remember { mutableStateOf(false) }
@@ -121,7 +121,7 @@ fun ChatScreen(
                 val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 if (!matches.isNullOrEmpty()) {
                     val text = matches[0]
-                    textInput = if (textInput.isBlank()) text else if (textInput.endsWith(" ")) "$textInput$text" else "$textInput $text"
+                    textInputState.value = if (textInputState.value.isBlank()) text else if (textInputState.value.endsWith(" ")) "${textInputState.value}$text" else "${textInputState.value} $text"
                 }
             }
         }
@@ -159,7 +159,7 @@ fun ChatScreen(
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 if (!matches.isNullOrEmpty()) {
                     val text = matches[0]
-                    textInput = if (textInput.isBlank()) text else if (textInput.endsWith(" ")) "$textInput$text" else "$textInput $text"
+                    textInputState.value = if (textInputState.value.isBlank()) text else if (textInputState.value.endsWith(" ")) "${textInputState.value}$text" else "${textInputState.value} $text"
                 }
             }
             override fun onPartialResults(partialResults: Bundle?) {}
@@ -664,7 +664,7 @@ fun ChatScreen(
             // Follow streaming tokens in real time ONLY when user is already near bottom (anchors to bubble bottom for smooth scroll)
             val lastContentLength = uiState.messages.lastOrNull()?.content?.length ?: 0
             LaunchedEffect(lastContentLength) {
-                if (uiState.isGenerating && isAtBottom && uiState.messages.isNotEmpty()) {
+                if (uiState.isGenerating && isAtBottom && !listState.isScrollInProgress && uiState.messages.isNotEmpty()) {
                     listState.scrollToItem(uiState.messages.size - 1, 100_000)
                 }
             }
@@ -696,7 +696,8 @@ fun ChatScreen(
                 ) {
                     itemsIndexed(
                         items = uiState.messages,
-                        key = { _, it -> it.id }
+                        key = { _, it -> it.id },
+                        contentType = { _, it -> if (it.isUser) "user" else "assistant" }
                     ) { index, message ->
                         val isLastMessage = index == uiState.messages.lastIndex
                         val isActivelyStreaming = isLastMessage && uiState.isGenerating && !message.isUser
@@ -939,164 +940,22 @@ fun ChatScreen(
                             }
                         }
 
-                        // Input control row (attachment consolidated button, voice button, text field, send button)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Consolidated "+" attachment button
-                                IconButton(
-                                    onClick = { showAttachmentSheet = true },
-                                    enabled = !hasAttachment && !uiState.isGenerating,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Attach Content",
-                                        tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    if (isListening) {
-                                        PulsingListeningIndicator()
-                                    }
-                                    IconButton(
-                                        onClick = { toggleListening() },
-                                        enabled = !uiState.isGenerating,
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Mic,
-                                            contentDescription = if (isListening) "Stop Listening" else "Voice Input",
-                                            tint = if (isListening) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-
-                                // Web search mode toggle button (Off -> Auto -> Always -> Off)
-                                val effectiveSearchMode = uiState.chatSearchOverride ?: uiState.webSearchMode
-                                val searchIconTint = when (effectiveSearchMode) {
-                                    WebSearchMode.OFF -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                                    WebSearchMode.AUTO -> MaterialTheme.colorScheme.primary
-                                    WebSearchMode.ALWAYS -> Color(0xFF16A34A)
-                                }
-                                val searchModeLabel = when (effectiveSearchMode) {
-                                    WebSearchMode.OFF -> "Web Search: Off"
-                                    WebSearchMode.AUTO -> "Web Search: Auto"
-                                    WebSearchMode.ALWAYS -> "Web Search: Always"
-                                }
-
-                                IconButton(
-                                    onClick = {
-                                        val nextMode = when (effectiveSearchMode) {
-                                            WebSearchMode.OFF -> WebSearchMode.AUTO
-                                            WebSearchMode.AUTO -> WebSearchMode.ALWAYS
-                                            WebSearchMode.ALWAYS -> WebSearchMode.OFF
-                                        }
-                                        if (nextMode != WebSearchMode.OFF && !uiState.searchDisclosureAcknowledged) {
-                                            showSearchDisclosureDialog = true
-                                        } else {
-                                            viewModel.setChatSearchOverride(nextMode)
-                                        }
-                                    },
-                                    enabled = !uiState.isGenerating,
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.TravelExplore,
-                                        contentDescription = searchModeLabel,
-                                        tint = searchIconTint,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                            
-                            Spacer(modifier = Modifier.width(4.dp))
-                            
-                            // Sleek and compact BasicTextField instead of the bulky TextField
-                            BasicTextField(
-                                value = textInput,
-                                onValueChange = { textInput = it },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                                textStyle = LocalTextStyle.current.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 15.sp
-                                ),
-                                maxLines = 4,
-                                decorationBox = { innerTextField ->
-                                    Box(contentAlignment = Alignment.CenterStart) {
-                                        if (textInput.isEmpty()) {
-                                            Text(
-                                                text = "Ask Local LLM/AI...",
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                fontSize = 15.sp
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-                                }
-                            )
-                            
-                            Spacer(modifier = Modifier.width(4.dp))
-                            
-                            if (uiState.isGenerating) {
-                                IconButton(
-                                    onClick = {
-                                        viewModel.stopGeneration()
-                                    },
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.error)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Stop Generation",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            } else {
-                                val canSend = (textInput.isNotBlank() || hasAttachment) && !uiState.isAttachmentProcessing
-                                IconButton(
-                                    onClick = {
-                                        viewModel.sendMessage(textInput)
-                                        textInput = ""
-                                    },
-                                    enabled = canSend,
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (canSend) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                            }
-                                        )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Send,
-                                        contentDescription = "Send Message",
-                                        tint = if (canSend) {
-                                            Color.White
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-                                        },
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
+                        // Input control row isolated into ChatInputBar to eliminate typing recompositions
+                        ChatInputBar(
+                            inputState = textInputState,
+                            isGenerating = uiState.isGenerating,
+                            hasAttachment = hasAttachment,
+                            isAttachmentProcessing = uiState.isAttachmentProcessing,
+                            isListening = isListening,
+                            effectiveSearchMode = uiState.chatSearchOverride ?: uiState.webSearchMode,
+                            searchDisclosureAcknowledged = uiState.searchDisclosureAcknowledged,
+                            onToggleListening = { toggleListening() },
+                            onOpenSearchDisclosure = { showSearchDisclosureDialog = true },
+                            onSetSearchOverride = { viewModel.setChatSearchOverride(it) },
+                            onOpenAttachmentSheet = { showAttachmentSheet = true },
+                            onSendMessage = { prompt -> viewModel.sendMessage(prompt) },
+                            onStopGeneration = { viewModel.stopGeneration() }
+                        )
                     }
                 }
             } else {
@@ -2245,4 +2104,171 @@ private fun PulsingListeningIndicator() {
             }
             .background(Color(0xFFEF4444), shape = CircleShape)
     )
+}
+
+@Composable
+private fun ChatInputBar(
+    inputState: MutableState<String>,
+    isGenerating: Boolean,
+    hasAttachment: Boolean,
+    isAttachmentProcessing: Boolean,
+    isListening: Boolean,
+    effectiveSearchMode: WebSearchMode,
+    searchDisclosureAcknowledged: Boolean,
+    onToggleListening: () -> Unit,
+    onOpenSearchDisclosure: () -> Unit,
+    onSetSearchOverride: (WebSearchMode) -> Unit,
+    onOpenAttachmentSheet: () -> Unit,
+    onSendMessage: (String) -> Unit,
+    onStopGeneration: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val text = inputState.value
+    val searchIconTint = when (effectiveSearchMode) {
+        WebSearchMode.OFF -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+        WebSearchMode.AUTO -> MaterialTheme.colorScheme.primary
+        WebSearchMode.ALWAYS -> Color(0xFF16A34A)
+    }
+    val searchModeLabel = when (effectiveSearchMode) {
+        WebSearchMode.OFF -> "Web Search: Off"
+        WebSearchMode.AUTO -> "Web Search: Auto"
+        WebSearchMode.ALWAYS -> "Web Search: Always"
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = onOpenAttachmentSheet,
+                enabled = !hasAttachment && !isGenerating,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Attach Content",
+                    tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(36.dp)
+            ) {
+                if (isListening) {
+                    PulsingListeningIndicator()
+                }
+                IconButton(
+                    onClick = onToggleListening,
+                    enabled = !isGenerating,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = if (isListening) "Stop Listening" else "Voice Input",
+                        tint = if (isListening) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = {
+                    val nextMode = when (effectiveSearchMode) {
+                        WebSearchMode.OFF -> WebSearchMode.AUTO
+                        WebSearchMode.AUTO -> WebSearchMode.ALWAYS
+                        WebSearchMode.ALWAYS -> WebSearchMode.OFF
+                    }
+                    if (nextMode != WebSearchMode.OFF && !searchDisclosureAcknowledged) {
+                        onOpenSearchDisclosure()
+                    } else {
+                        onSetSearchOverride(nextMode)
+                    }
+                },
+                enabled = !isGenerating,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.TravelExplore,
+                    contentDescription = searchModeLabel,
+                    tint = searchIconTint,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(4.dp))
+
+        BasicTextField(
+            value = text,
+            onValueChange = { inputState.value = it },
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 8.dp, horizontal = 4.dp),
+            textStyle = LocalTextStyle.current.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 15.sp
+            ),
+            maxLines = 4,
+            decorationBox = { innerTextField ->
+                Box(contentAlignment = Alignment.CenterStart) {
+                    if (text.isEmpty()) {
+                        Text(
+                            text = "Ask Local LLM/AI...",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            fontSize = 15.sp
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.width(4.dp))
+
+        if (isGenerating) {
+            IconButton(
+                onClick = onStopGeneration,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.error)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Stop Generation",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        } else {
+            val canSend = (text.isNotBlank() || hasAttachment) && !isAttachmentProcessing
+            IconButton(
+                onClick = {
+                    val trimmed = text.trim()
+                    if (trimmed.isNotBlank() || hasAttachment) {
+                        onSendMessage(trimmed)
+                        inputState.value = ""
+                    }
+                },
+                enabled = canSend,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (canSend) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send Message",
+                    tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
 }

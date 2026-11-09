@@ -40,7 +40,7 @@ The app includes built-in presets for 10 highly-capable, lightweight models opti
 
 | Model | Developer / Author | Parameters | Approx. Size | Min. RAM Requirement | Multimodal (Vision) | Role |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Qwen 3 0.6B (Pocket Turbo)** | Alibaba | 0.6B | ~498 MB | 2 GB+ | No | Ultra-Fast Pocket Turbo Floor Model |
+| **Qwen 3 0.6B (Pocket Turbo)** | Alibaba | 0.6B | ~343 MB | 2 GB+ | No | Ultra-Fast Pocket Turbo Floor Model |
 | **Qwen 2.5 1.5B Instruct** | Alibaba | 1.5B | ~1.60 GB | 4 GB+ | No | Daily Multilingual Baseline (Q8) |
 | **Qwen 3 1.7B (Dynamic INT4)** | Alibaba | 1.7B | ~977 MB | 4 GB+ | No | Sub-1GB Dynamic Compact Powerhouse |
 | **Qwen 2.5 Coder 1.5B Instruct** | Alibaba | 1.5B | ~1.12 GB | 4 GB+ | No | Agile Code Intelligence & Scripting |

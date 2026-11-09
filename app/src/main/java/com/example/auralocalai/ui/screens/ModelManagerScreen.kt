@@ -90,6 +90,16 @@ fun ModelManagerScreen(
             ModelPresetCategory.CODING -> ModelPreset.presets.filter { it.tags.contains(ModelTag.CODING) }
         }
     }
+
+    val customModels = remember(uiState.localModels) {
+        uiState.localModels.filter { fileName ->
+            !ModelPreset.presetsByFileName.containsKey(fileName.lowercase()) &&
+            !fileName.contains("cache", ignoreCase = true) &&
+            !fileName.contains("mldrift", ignoreCase = true) &&
+            !fileName.endsWith(".bin", ignoreCase = true) &&
+            (fileName.endsWith(".litertlm", ignoreCase = true) || fileName.endsWith(".task", ignoreCase = true))
+        }
+    }
  
     Scaffold(
         topBar = {
@@ -205,7 +215,8 @@ fun ModelManagerScreen(
             // Recommended Presets List (Filtered)
             items(
                 items = filteredPresets,
-                key = { it.id }
+                key = { it.id },
+                contentType = { "preset" }
             ) { preset ->
                 val isDownloaded = uiState.localModels.contains(preset.fileName)
                 val isActive = uiState.activeModelId == preset.id
@@ -235,13 +246,6 @@ fun ModelManagerScreen(
             }
 
             // Sideloaded Custom Models List
-            val customModels = uiState.localModels.filter { fileName ->
-                !ModelPreset.presetsByFileName.containsKey(fileName.lowercase()) &&
-                !fileName.contains("cache", ignoreCase = true) &&
-                !fileName.contains("mldrift", ignoreCase = true) &&
-                !fileName.endsWith(".bin", ignoreCase = true) &&
-                (fileName.endsWith(".litertlm", ignoreCase = true) || fileName.endsWith(".task", ignoreCase = true))
-            }
             if (customModels.isNotEmpty()) {
                 item {
                     Text(
@@ -255,7 +259,8 @@ fun ModelManagerScreen(
 
                 items(
                     items = customModels,
-                    key = { it }
+                    key = { it },
+                    contentType = { "custom" }
                 ) { fileName ->
                     val isActive = uiState.activeModelId == fileName
                     val isLoaded = uiState.modelState is ModelState.Loaded && isActive

@@ -156,6 +156,11 @@ data class ModelPreset(
                 val urlName = p.downloadUrl.substringAfterLast('/').lowercase()
                 map[urlName] = p
             }
+            // Legacy alias mappings for older downloads
+            presets.firstOrNull { it.id == "qwen3-0.6b" }?.let { qwen ->
+                map["qwen3_0_6b_mixed_int4.litertlm"] = qwen
+                map["qwen3-0.6b_dynamic_wi4b32_afp32.litertlm"] = qwen
+            }
             map
         }
 
@@ -194,19 +199,19 @@ data class ModelPreset(
             ModelPreset(
                 id = "qwen3-0.6b",
                 name = "Qwen 3 0.6B (Pocket Turbo)",
-                description = "Alibaba's ultra-lightweight hybrid reasoning model. Highly optimized for fast responses on 2GB+ devices with minimal battery drain (Pocket Turbo).",
-                sizeBytes = 497516544L,
+                description = "Alibaba's ultra-lightweight hybrid reasoning model with dynamic INT4 weights and FP32 activations. Blazing fast responses on 2GB+ devices with native CPU & GPU acceleration (Pocket Turbo).",
+                sizeBytes = 343490560L,
                 minRamGb = 2,
-                downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/e6687177e00897731e7716267eebd4eba0dde7c2/qwen3_0_6b_mixed_int4.litertlm",
+                downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm",
                 fileName = "qwen3-0.6b.litertlm",
                 requiresHfToken = false,
                 expectedExtension = ".litertlm",
                 backendRestriction = LlmBackendRestriction.ANY,
-                quantization = "mixed INT4",
+                quantization = "dynamic INT4",
                 parameterCount = "0.6B",
                 contextLength = "2,048 tokens",
                 isReasoningModel = true,
-                expectedSha256 = "7900eb4e7362d88c58782c6f9999bb7a129e03544aa98b8f338ea0cc5d8c22c1",
+                expectedSha256 = "bf1aba9ce8d963124407353c6aa4cbf72eba78db21ae133de983eac672ce83e0",
                 kvCacheTokens = 2048,
                 supportsVision = false,
                 speedTier = ModelSpeedTier.TURBO,
