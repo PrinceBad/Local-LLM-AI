@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Edit
@@ -89,6 +91,7 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val streamingText by viewModel.streamingMessageText.collectAsState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -682,7 +685,14 @@ fun ChatScreen(
                         onQuickPrompt = { prompt ->
                             viewModel.sendMessage(prompt)
                         },
-                        technicalDetails = uiState.lastLoadErrorRaw
+                        technicalDetails = uiState.lastLoadErrorRaw,
+                        onRetryWithCpu = {
+                            viewModel.retryLastModelWithCpu()
+                        },
+                        onDownloadUpdatedModel = {
+                            val qwenPreset = ModelPreset.presets.firstOrNull { it.id == "qwen3-0.6b" }
+                            if (qwenPreset != null) viewModel.downloadModel(qwenPreset)
+                        }
                     )
                 }
             } else {
@@ -720,12 +730,13 @@ fun ChatScreen(
                         ChatBubble(
                             message = message,
                             isActivelyGenerating = isActivelyStreaming,
-                            isReasoningModel = isReasoning
+                            isReasoningModel = isReasoning,
+                            streamingText = if (isActivelyStreaming) streamingText else null
                         )
                     }
 
                     val lastMessage = uiState.messages.lastOrNull()
-                    val isWaitingForFirstToken = uiState.isGenerating && (lastMessage == null || lastMessage.isUser || lastMessage.content.isEmpty())
+                    val isWaitingForFirstToken = uiState.isGenerating && (lastMessage == null || lastMessage.isUser || (lastMessage.content.isEmpty() && streamingText.isNullOrEmpty()))
                     if (isWaitingForFirstToken) {
                         item {
                             TypingIndicatorBubble()
@@ -1300,7 +1311,8 @@ private val UserBubbleBorder = BorderStroke(0.dp, Color.Transparent)
 fun ChatBubble(
     message: ChatMessage,
     isActivelyGenerating: Boolean = false,
-    isReasoningModel: Boolean = false
+    isReasoningModel: Boolean = false,
+    streamingText: String? = null
 ) {
     val bubbleColor = if (message.isUser) {
         MaterialTheme.colorScheme.primary
@@ -1453,11 +1465,11 @@ fun ChatBubble(
                 }
 
                 // Parse think blocks only for AI assistant messages from reasoning models
-                // TODO: consider incremental parsing from last known offset if this shows up in profiling
-                val parsed = if (!message.isUser && (isReasoningModel || hasThinkingTags(message.content))) {
-                    remember(message.content) { parseThinkBlocks(message.content) }
+                val textToDisplay = if (isActivelyGenerating && streamingText != null) streamingText else message.content
+                val parsed = if (!message.isUser && (isReasoningModel || hasThinkingTags(textToDisplay))) {
+                    remember(textToDisplay) { parseThinkBlocks(textToDisplay) }
                 } else {
-                    remember(message.content) { ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = message.content) }
+                    remember(textToDisplay) { ParsedMessageContent(thinkContent = null, hasUnclosedThink = false, mainContent = textToDisplay) }
                 }
 
                 // Collapsible reasoning process accordion for DeepSeek-R1 CoT
@@ -1805,7 +1817,9 @@ fun EmptyStateOnboarding(
     localModels: List<String>,
     onNavigateToModelManager: () -> Unit,
     onQuickPrompt: (String) -> Unit,
-    technicalDetails: String? = null
+    technicalDetails: String? = null,
+    onRetryWithCpu: (() -> Unit)? = null,
+    onDownloadUpdatedModel: (() -> Unit)? = null
 ) {
     val haptic = LocalHapticFeedback.current
     Box(
@@ -2006,11 +2020,54 @@ fun EmptyStateOnboarding(
                             }
                         }
                     }
+                    val errorMsg = modelState.message
+                    val isVulkanGpuError = errorMsg.contains("Vulkan", ignoreCase = true) ||
+                        errorMsg.contains("GPU", ignoreCase = true) ||
+                        technicalDetails?.contains("Vulkan", ignoreCase = true) == true ||
+                        technicalDetails?.contains("VK_ERROR", ignoreCase = true) == true
+                    val isLegacyModelError = errorMsg.contains("343 MB", ignoreCase = true) ||
+                        errorMsg.contains("mixed_int4", ignoreCase = true) ||
+                        errorMsg.contains("lacks CPU kernels", ignoreCase = true)
+
                     Spacer(modifier = Modifier.height(20.dp))
-                    Button(
+
+                    if (isLegacyModelError && onDownloadUpdatedModel != null) {
+                        Button(
+                            onClick = onDownloadUpdatedModel,
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Download Updated Model (343 MB)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    } else if (isVulkanGpuError && onRetryWithCpu != null) {
+                        Button(
+                            onClick = onRetryWithCpu,
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Switch to CPU & Retry",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    OutlinedButton(
                         onClick = onNavigateToModelManager,
                         shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth().height(44.dp)
                     ) {
                         Text(

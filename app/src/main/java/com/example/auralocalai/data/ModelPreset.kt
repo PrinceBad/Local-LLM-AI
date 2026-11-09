@@ -189,6 +189,30 @@ data class ModelPreset(
                    modelId.contains("r1", ignoreCase = true)
         }
 
+        /**
+         * Identifies known legacy/obsolete builds on disk that need updating to the universal dynamic build.
+         * Explicitly scoped to known legacy filenames and sizes (> 450 MB for Qwen 3 0.6B).
+         */
+        fun isKnownLegacyBuild(preset: ModelPreset, file: File): Boolean {
+            if (file.exists() && !file.isFile) return false
+            val name = file.name.lowercase()
+            if (preset.id == "qwen3-0.6b") {
+                if (name == "qwen3_0_6b_mixed_int4.litertlm") return true
+                if (name == "qwen3-0.6b.litertlm" && file.length() > 450_000_000L) return true
+            }
+            return false
+        }
+
+        /**
+         * Returns confirmed legacy aliases for a preset that should be cleaned up on delete/update.
+         */
+        fun getLegacyAliases(preset: ModelPreset): List<String> {
+            return when (preset.id) {
+                "qwen3-0.6b" -> listOf("qwen3_0_6b_mixed_int4.litertlm", "qwen3-0.6b_dynamic_wi4b32_afp32.litertlm")
+                else -> emptyList()
+            }
+        }
+
         fun isKnownNonReasoningModel(modelId: String?): Boolean {
             if (modelId == null) return false
             val preset = findByIdOrFileName(modelId)

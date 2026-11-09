@@ -8,6 +8,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class LlmViewModelLogicTest {
 
@@ -190,5 +191,61 @@ class LlmViewModelLogicTest {
     fun `UiState defaults autoLoadModelOnStartup to false`() {
         val defaultState = UiState()
         assertFalse("Auto-load must default to false to prevent startup ANR and Hexagon RAM spikes", defaultState.autoLoadModelOnStartup)
+    }
+    @Test
+    fun `isKnownLegacyBuild correctly flags old Qwen 0_6b builds`() {
+        val pocketTurbo = ModelPreset.presets.first { it.id == "qwen3-0.6b" }
+        
+        // Old filename
+        val oldFile = object : File("qwen3_0_6b_mixed_int4.litertlm") {
+            override fun exists() = true
+            override fun isFile() = true
+        }
+        assertTrue(ModelPreset.isKnownLegacyBuild(pocketTurbo, oldFile))
+
+        // Large file (> 450 MB) with qwen3-0.6b.litertlm name
+        val largeLegacyMock = object : File("qwen3-0.6b.litertlm") {
+            override fun exists() = true
+            override fun isFile() = true
+            override fun length() = 522_000_000L
+        }
+        assertTrue(ModelPreset.isKnownLegacyBuild(pocketTurbo, largeLegacyMock))
+
+        // New universal build (~343 MB)
+        val newBuildMock = object : File("qwen3-0.6b.litertlm") {
+            override fun exists() = true
+            override fun isFile() = true
+            override fun length() = 343_490_560L
+        }
+        assertFalse(ModelPreset.isKnownLegacyBuild(pocketTurbo, newBuildMock))
+
+        // Non-pocket turbo preset should never be flagged by this heuristic
+        val smolLm = ModelPreset.presets.first { it.id == "smollm2-1.7b" }
+        val smolLmFile = object : File("smollm2-1.7b.litertlm") {
+            override fun exists() = true
+            override fun isFile() = true
+            override fun length() = 980_000_000L
+        }
+        assertFalse(ModelPreset.isKnownLegacyBuild(smolLm, smolLmFile))
+    }
+
+    @Test
+    fun `getLegacyAliases returns expected legacy filenames for Pocket Turbo`() {
+        val pocketTurbo = ModelPreset.presets.first { it.id == "qwen3-0.6b" }
+        val aliases = ModelPreset.getLegacyAliases(pocketTurbo)
+        assertTrue(aliases.contains("qwen3_0_6b_mixed_int4.litertlm"))
+        assertTrue(aliases.contains("qwen3-0.6b_dynamic_wi4b32_afp32.litertlm"))
+
+        val smolLm = ModelPreset.presets.first { it.id == "smollm2-1.7b" }
+        assertTrue(ModelPreset.getLegacyAliases(smolLm).isEmpty())
+    }
+
+    @Test
+    fun `friendlyErrorMessage diagnoses legacy mixed_int4 and GPU timeout errors`() {
+        val legacyMsg = LlmViewModel.friendlyErrorMessage("Failed to load model: qwen3_0_6b_mixed_int4.litertlm lacks CPU kernels")
+        assertTrue(legacyMsg.contains("lacks CPU kernels") && legacyMsg.contains("343 MB Turbo"))
+
+        val timeoutMsg = LlmViewModel.friendlyErrorMessage("GPU shader compilation timed out after 75s.")
+        assertTrue(timeoutMsg.contains("timed out") && timeoutMsg.contains("CPU backend"))
     }
 }

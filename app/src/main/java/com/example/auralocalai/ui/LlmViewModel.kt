@@ -175,6 +175,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     private val webSearchClient = WebSearchClient()
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+    private val _streamingMessageText = MutableStateFlow<String?>(null)
+    val streamingMessageText: StateFlow<String?> = _streamingMessageText.asStateFlow()
 
     /**
      * Isolated theme stream to prevent entire root Activity and Nav tree
@@ -603,7 +605,19 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         try { f.delete() } catch (_: Throwable) {}
                     }
                 }
-                val matchingPreset = ModelPreset.presets.firstOrNull { it.fileName == fileName }
+                val matchingPreset = ModelPreset.findByIdOrFileName(fileName)
+                if (matchingPreset != null) {
+                    for (alias in ModelPreset.getLegacyAliases(matchingPreset)) {
+                        val aliasFile = File(storageDir, alias)
+                        if (aliasFile.exists()) {
+                            try { aliasFile.delete() } catch (_: Throwable) {}
+                        }
+                        val aliasTmp = File(storageDir, "$alias.tmp")
+                        if (aliasTmp.exists()) {
+                            try { aliasTmp.delete() } catch (_: Throwable) {}
+                        }
+                    }
+                }
                 val presetId = matchingPreset?.id ?: fileName
                 if (uiState.value.activeModelId == presetId) {
                     inferenceEngine.closeAsync()
@@ -618,6 +632,21 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 // Ignore errors
             }
             refreshDownloadedModels()
+        }
+    }
+
+    fun clearHardwareAccelerationCache() {
+        inferenceEngine.clearNpuFailureCache()
+        inferenceEngine.clearGpuFailureCache()
+    }
+
+    fun retryLastModelWithCpu() {
+        val appPrefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        val lastFile = appPrefs.getString("last_active_model_file", null)
+        if (lastFile != null) {
+            val lastId = appPrefs.getString("last_active_model_id", null) ?: lastFile
+            setPreferredBackend("CPU_ONLY")
+            loadModel(lastFile, lastId)
         }
     }
 
@@ -776,6 +805,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopGeneration() {
+        _streamingMessageText.value = null
         inferenceEngine.cancelInference()
         inferenceJob?.cancel()
         _uiState.update { it.copy(isGenerating = false, isSearching = false, activeSearchQuery = null) }
@@ -1601,6 +1631,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             val sourcesToAttach = searchOutcome?.sources?.takeIf { it.isNotEmpty() }
 
             try {
+                _streamingMessageText.value = ""
                 val aiMessagePlaceholder = ChatMessage(
                     content = "",
                     isUser = false,
@@ -1635,16 +1666,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                         tokenCount++
                         accumulatedBuilder.append(partialToken)
                         val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastUpdateTime > 45) {
-                            val currentSnapshot = accumulatedBuilder.toString()
-                            _uiState.update { state ->
-                                val updatedMessages = ArrayList(state.messages)
-                                if (updatedMessages.isNotEmpty()) {
-                                    val oldMessage = updatedMessages.last()
-                                    updatedMessages[updatedMessages.lastIndex] = oldMessage.copy(content = currentSnapshot)
-                                }
-                                state.copy(messages = updatedMessages)
-                            }
+                        if (currentTime - lastUpdateTime > 65) {
+                            _streamingMessageText.value = accumulatedBuilder.toString()
                             lastUpdateTime = currentTime
                         }
                     }
@@ -1678,6 +1701,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } else null
 
+                _streamingMessageText.value = null
                 val finalContent = accumulatedBuilder.toString()
                 _uiState.update { state ->
                     val updatedMessages = ArrayList(state.messages)
@@ -1941,6 +1965,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetNpuCache() {
         inferenceEngine.clearNpuFailureCache()
+        inferenceEngine.clearGpuFailureCache()
     }
 
     override fun onCleared() {

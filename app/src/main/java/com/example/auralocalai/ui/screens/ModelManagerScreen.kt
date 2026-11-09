@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -218,7 +219,10 @@ fun ModelManagerScreen(
                 key = { it.id },
                 contentType = { "preset" }
             ) { preset ->
+                val storageDir = remember { java.io.File(context.getExternalFilesDir(null) ?: context.filesDir, "models") }
+                val localFile = remember(preset.fileName) { java.io.File(storageDir, preset.fileName) }
                 val isDownloaded = uiState.localModels.contains(preset.fileName)
+                val isLegacyBuild = isDownloaded && ModelPreset.isKnownLegacyBuild(preset, localFile)
                 val isActive = uiState.activeModelId == preset.id
                 val isDownloading = uiState.currentDownloadingModelId == preset.id
                 val isLoadingThisModel = uiState.loadingModelId == preset.id
@@ -236,7 +240,9 @@ fun ModelManagerScreen(
                     downloadState = if (isDownloading) uiState.downloadState else DownloadState.Idle,
                     loadingStage = if (isLoadingThisModel) uiState.loadingStage else null,
                     benchmark = benchmark,
+                    isLegacyBuild = isLegacyBuild,
                     onDownload = { viewModel.downloadModel(preset) },
+                    onUpdate = { viewModel.downloadModel(preset) },
                     onLoad = { viewModel.loadModel(preset.fileName, preset.id) },
                     onOpenChat = onBack,
                     onCancelLoad = { viewModel.cancelLoading() },
@@ -291,6 +297,15 @@ fun ModelManagerScreen(
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (fileName.contains("qwen3_0_6b_mixed_int4", ignoreCase = true)) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Legacy GPU-only prototype lacking CPU kernels. Update to official 343 MB build in Presets above.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
 
                             Spacer(modifier = Modifier.height(12.dp))
 
@@ -453,7 +468,9 @@ fun PresetModelCard(
     downloadState: DownloadState,
     loadingStage: String? = null,
     benchmark: com.example.auralocalai.ui.ModelLoadBenchmark? = null,
+    isLegacyBuild: Boolean = false,
     onDownload: () -> Unit,
+    onUpdate: () -> Unit = {},
     onLoad: () -> Unit,
     onOpenChat: () -> Unit,
     onCancelLoad: () -> Unit,
@@ -742,6 +759,25 @@ fun PresetModelCard(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Delete", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                if (isLegacyBuild) {
+                                    Button(
+                                        onClick = onUpdate,
+                                        enabled = !isLoading && !isOtherLoading && !isDownloading,
+                                        shape = RoundedCornerShape(18.dp),
+                                        modifier = Modifier.height(36.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Download,
+                                            contentDescription = "Update model",
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Update (343 MB)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
 
                                 Button(

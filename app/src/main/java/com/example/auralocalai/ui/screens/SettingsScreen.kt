@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.TravelExplore
 import com.example.auralocalai.data.WebSearchMode
 import com.example.auralocalai.data.SearchOutcome
@@ -815,6 +816,29 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         lineHeight = 15.sp
                     )
+                    val isEntryGpu = remember { SocDetector.shouldDefaultToCpu(context) }
+                    if (isEntryGpu) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Entry-level GPU (e.g. Adreno 610) detected. Auto mode safely routes to multithreaded CPU for instant, crash-free performance.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(10.dp))
 
                     val isTensor = diagnostics.socInfo.vendor == SocVendor.GOOGLE_TENSOR
@@ -910,14 +934,14 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Reset NPU Failure Cache",
+                                text = "Reset Acceleration Cache",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (npuCacheClearedMsg) "NPU failure cache cleared! Models will retry NPU on next load."
-                                       else "Clear saved NPU error markers so models can re-attempt Hexagon/Tensor NPU initialization.",
+                                text = if (npuCacheClearedMsg) "Hardware acceleration cache cleared! Models will retry GPU/NPU on next load."
+                                       else "Clear saved GPU/NPU error markers so models can re-attempt Vulkan GPU or NPU initialization.",
                                 fontSize = 11.sp,
                                 color = if (npuCacheClearedMsg) MaterialTheme.colorScheme.primary
                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
