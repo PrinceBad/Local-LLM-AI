@@ -49,4 +49,16 @@ class LlmInferenceEngineTest {
         assertTrue("NPU cache version must be stamped for migration", LlmInferenceEngine.NPU_CACHE_VERSION.isNotBlank())
         assertTrue("NPU cache version must include version identifier", LlmInferenceEngine.NPU_CACHE_VERSION.contains("v3.0"))
     }
+
+    @Test
+    fun testIsMissingSpeculativeDrafterError_detectsDirectAndWrappedCauses() {
+        val direct = RuntimeException("Failed to create engine: NOT_FOUND: tf_lite_mtp_drafter not found in the model.")
+        assertTrue(LlmInferenceEngine.isMissingSpeculativeDrafterError(direct))
+
+        val wrapped = Exception("CPU initialization failed", RuntimeException("missing mtp_drafter subgraph"))
+        assertTrue(LlmInferenceEngine.isMissingSpeculativeDrafterError(wrapped))
+
+        val unrelated = RuntimeException("Vulkan VK_ERROR_DEVICE_LOST during shader pipeline creation")
+        assertFalse(LlmInferenceEngine.isMissingSpeculativeDrafterError(unrelated))
+    }
 }

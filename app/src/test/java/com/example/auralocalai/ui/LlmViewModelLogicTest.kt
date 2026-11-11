@@ -245,7 +245,12 @@ class LlmViewModelLogicTest {
         val legacyMsg = LlmViewModel.friendlyErrorMessage("Failed to load model: qwen3_0_6b_mixed_int4.litertlm lacks CPU kernels")
         assertTrue(legacyMsg.contains("lacks CPU kernels") && legacyMsg.contains("343 MB Turbo"))
 
-        val timeoutMsg = LlmViewModel.friendlyErrorMessage("GPU shader compilation timed out after 75s.")
-        assertTrue(timeoutMsg.contains("timed out") && timeoutMsg.contains("CPU backend"))
+        val timeoutMsg = LlmViewModel.friendlyErrorMessage("GPU shader compilation timed out after 25s.")
+        assertTrue(timeoutMsg.contains("timed out") && timeoutMsg.contains("25s") && timeoutMsg.contains("CPU backend"))
+
+        val mtpMsg = LlmViewModel.friendlyErrorMessage(
+            "CPU: Failed to create engine: NOT_FOUND: tf_lite_mtp_drafter not found in the model."
+        )
+        assertTrue(mtpMsg.contains("MTP") && mtpMsg.contains("speculative decoding"))
     }
 }

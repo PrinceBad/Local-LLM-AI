@@ -988,7 +988,11 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
                 // GPU timeout
                 lower.contains("timed out") && lower.contains("gpu") ->
-                    "GPU shader compilation timed out after 75s. Switch to CPU backend in Settings for this model."
+                    "GPU shader compilation timed out after 25s. Switch to CPU backend in Settings for this model."
+
+                // Missing MTP speculative drafter subgraph
+                lower.contains("tf_lite_mtp_drafter") || lower.contains("mtp_drafter") ->
+                    "This model bundle does not include an MTP speculative decoding drafter. Retry loading or switch backend in Settings."
 
                 // Specific Vulkan driver failure
                 lower.contains("vk_error") ->

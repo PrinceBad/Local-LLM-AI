@@ -120,6 +120,9 @@ class LlmInferenceEngine(private val context: Context) {
     /** Whether the loaded bundle natively supports reasoning/thinking according to ModelInfo. */
     var detectedSupportsThinking: Boolean = false
         private set
+    /** Whether the loaded bundle natively supports speculative decoding (MTP drafter) according to ModelInfo. */
+    var detectedSupportsSpeculativeDecoding: Boolean = false
+        private set
     /** Whether the loaded bundle supports multimodal image inputs according to ModelInfo. */
     var detectedSupportsVision: Boolean = false
         private set
@@ -190,8 +193,14 @@ class LlmInferenceEngine(private val context: Context) {
                     detectedSupportsVision = info.inputModalities().vision
                     if (info is ModelInfo.Llm) {
                         detectedSupportsThinking = info.supportsThinking()
+                        detectedSupportsSpeculativeDecoding = try {
+                            info.hasSpeculativeDecodingSupport()
+                        } catch (_: Throwable) {
+                            false
+                        }
                     } else {
                         detectedSupportsThinking = false
+                        detectedSupportsSpeculativeDecoding = false
                     }
                     detectedSupportedBackends = try { info.supportedBackends(Modality.TEXT).toSet() } catch (_: Throwable) { emptySet() }
                     detectedNpuBrand = try { info.npuBrand(Modality.TEXT) } catch (_: Throwable) { NpuBrand.UNKNOWN }
@@ -199,8 +208,8 @@ class LlmInferenceEngine(private val context: Context) {
                     android.util.Log.i(
                         "LlmInferenceEngine",
                         "ModelInfo: maxContext=$detectedMaxContextTokens, vision=$detectedSupportsVision, " +
-                        "thinking=$detectedSupportsThinking, backends=$detectedSupportedBackends, " +
-                        "npuBrand=$detectedNpuBrand, socName=$detectedSocName"
+                        "thinking=$detectedSupportsThinking, speculativeDecoding=$detectedSupportsSpeculativeDecoding, " +
+                        "backends=$detectedSupportedBackends, npuBrand=$detectedNpuBrand, socName=$detectedSocName"
                     )
                     android.util.Log.i(
                         "LlmInferenceEngine",
@@ -212,6 +221,7 @@ class LlmInferenceEngine(private val context: Context) {
             } catch (e: Throwable) {
                 android.util.Log.w("LlmInferenceEngine", "ModelInfo extraction skipped: ${e.message}")
                 detectedSupportsThinking = false
+                detectedSupportsSpeculativeDecoding = false
                 detectedSupportedBackends = emptySet()
             }
 
@@ -275,9 +285,12 @@ class LlmInferenceEngine(private val context: Context) {
             val isCachedGpuFailure = failedGpuModelPaths.contains(gpuCacheKey) ||
                 context.getSharedPreferences("gpu_backend_cache", Context.MODE_PRIVATE).getBoolean(gpuCacheKey, false)
             val isEntryGpuSoc = SocDetector.shouldDefaultToCpu(context)
-            val modelSupportsCpu = detectedSupportedBackends.contains(BackendType.CPU) ||
-                detectedSupportedBackends.isEmpty() ||
-                (preset?.backendRestriction == LlmBackendRestriction.ANY)
+            val modelSupportsCpu = if (detectedSupportedBackends.isNotEmpty()) {
+                detectedSupportedBackends.contains(BackendType.CPU)
+            } else {
+                preset?.backendRestriction != LlmBackendRestriction.GPU_ONLY &&
+                    preset?.backendRestriction != LlmBackendRestriction.NPU_ONLY
+            }
             val shouldBypassGpuInAuto = (preferredBackend == "AUTO") && (isCachedGpuFailure || (isEntryGpuSoc && modelSupportsCpu))
 
             if (preferredBackend == "AUTO" && shouldBypassGpuInAuto) {
@@ -311,21 +324,17 @@ class LlmInferenceEngine(private val context: Context) {
                     onStageUpdate?.invoke("Compiling GPU shaders\u2026")
                     var tempGpuEngine: Engine? = null
                     try {
-                        val config = EngineConfig(
-                            modelPath = modelPath,
-                            backend = Backend.GPU(),
-                            visionBackend = visionBackendToUse,
-                            cacheDir = getCompiledCacheDir().absolutePath,
-                            maxNumTokens = effectiveMaxTokens,
-                            maxNumImages = if (modelSupportsVision) 1 else null,
-                            speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
-                        )
                         if (preferredBackend == "AUTO") {
                             val initOk = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
-                                val eng = Engine(config)
-                                tempGpuEngine = eng
-                                eng.initialize()
-                                eng
+                                initializeEngineWithSpeculativeFallback(
+                                    modelPath = modelPath,
+                                    backend = Backend.GPU(),
+                                    visionBackend = visionBackendToUse,
+                                    maxNumTokens = effectiveMaxTokens,
+                                    maxNumImages = if (modelSupportsVision) 1 else null,
+                                    trySpeculative = detectedSupportsSpeculativeDecoding,
+                                    onTempEngineCreated = { tempGpuEngine = it }
+                                )
                             }
                             if (initOk == null) {
                                 throw RuntimeException("GPU shader compilation timed out after 25s")
@@ -334,9 +343,15 @@ class LlmInferenceEngine(private val context: Context) {
                             engine = initOk
                             conversation = newConversation(initOk)
                         } else {
-                            val eng = Engine(config)
-                            tempGpuEngine = eng
-                            eng.initialize()
+                            val eng = initializeEngineWithSpeculativeFallback(
+                                modelPath = modelPath,
+                                backend = Backend.GPU(),
+                                visionBackend = visionBackendToUse,
+                                maxNumTokens = effectiveMaxTokens,
+                                maxNumImages = if (modelSupportsVision) 1 else null,
+                                trySpeculative = detectedSupportsSpeculativeDecoding,
+                                onTempEngineCreated = { tempGpuEngine = it }
+                            )
                             kotlinx.coroutines.currentCoroutineContext().ensureActive()
                             engine = eng
                             conversation = newConversation(eng)
@@ -434,18 +449,15 @@ class LlmInferenceEngine(private val context: Context) {
                             onStageUpdate?.invoke("${socInfo.marketingName} TPU detected \u2014 initializing Tensor backend\u2026")
                             var tempTensorEngine: Engine? = null
                             try {
-                                val config = EngineConfig(
+                                val eng = initializeEngineWithSpeculativeFallback(
                                     modelPath = modelPath,
                                     backend = Backend.GOOGLE_TENSOR(),
                                     visionBackend = visionBackendToUse,
-                                    cacheDir = getCompiledCacheDir().absolutePath,
                                     maxNumTokens = effectiveMaxTokens,
                                     maxNumImages = if (modelSupportsVision) 1 else null,
-                                    speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
+                                    trySpeculative = detectedSupportsSpeculativeDecoding,
+                                    onTempEngineCreated = { tempTensorEngine = it }
                                 )
-                                val eng = Engine(config)
-                                tempTensorEngine = eng
-                                eng.initialize()
                                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                                 engine = eng
                                 conversation = newConversation(eng)
@@ -479,18 +491,15 @@ class LlmInferenceEngine(private val context: Context) {
                                 } catch (envEx: Throwable) {
                                     android.util.Log.e("LlmInferenceEngine", "Failed to set ADSP_LIBRARY_PATH", envEx)
                                 }
-                                val config = EngineConfig(
+                                val eng = initializeEngineWithSpeculativeFallback(
                                     modelPath = modelPath,
                                     backend = Backend.NPU(nativeLibraryDir = nativeLibDir),
                                     visionBackend = visionBackendToUse,
-                                    cacheDir = getCompiledCacheDir().absolutePath,
                                     maxNumTokens = effectiveMaxTokens,
                                     maxNumImages = if (modelSupportsVision) 1 else null,
-                                    speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
+                                    trySpeculative = detectedSupportsSpeculativeDecoding,
+                                    onTempEngineCreated = { tempQnnEngine = it }
                                 )
-                                val eng = Engine(config)
-                                tempQnnEngine = eng
-                                eng.initialize()
                                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                                 engine = eng
                                 conversation = newConversation(eng)
@@ -537,18 +546,15 @@ class LlmInferenceEngine(private val context: Context) {
                     onStageUpdate?.invoke("Initializing CPU backend\u2026")
                     var tempCpuEngine: Engine? = null
                     try {
-                        val config = EngineConfig(
+                        val eng = initializeEngineWithSpeculativeFallback(
                             modelPath = modelPath,
                             backend = Backend.CPU(threadCount),
                             visionBackend = visionBackendToUse,
-                            cacheDir = getCompiledCacheDir().absolutePath,
                             maxNumTokens = effectiveMaxTokens,
                             maxNumImages = if (modelSupportsVision) 1 else null,
-                            speculativeDecodingConfig = SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
+                            trySpeculative = detectedSupportsSpeculativeDecoding,
+                            onTempEngineCreated = { tempCpuEngine = it }
                         )
-                        val eng = Engine(config)
-                        tempCpuEngine = eng
-                        eng.initialize()
                         kotlinx.coroutines.currentCoroutineContext().ensureActive()
                         engine = eng
                         conversation = newConversation(eng)
@@ -585,6 +591,81 @@ class LlmInferenceEngine(private val context: Context) {
             Result.failure(e)
         }
     }
+    }
+
+    private fun buildEngineConfig(
+        modelPath: String,
+        backend: Backend,
+        visionBackend: Backend?,
+        maxNumTokens: Int,
+        maxNumImages: Int?,
+        enableSpeculativeDecoding: Boolean
+    ): EngineConfig {
+        return EngineConfig(
+            modelPath = modelPath,
+            backend = backend,
+            visionBackend = visionBackend,
+            cacheDir = getCompiledCacheDir().absolutePath,
+            maxNumTokens = maxNumTokens,
+            maxNumImages = maxNumImages,
+            speculativeDecodingConfig = if (enableSpeculativeDecoding) {
+                SpeculativeDecodingConfig(SpeculativeDecodingMode.ADAPTIVE)
+            } else {
+                null
+            }
+        )
+    }
+
+    /**
+     * Initializes an Engine, enabling speculative decoding only when supported by the model.
+     * If a backend still fails due to a missing MTP drafter subgraph (tf_lite_mtp_drafter),
+     * safely retries initialization with speculative decoding disabled.
+     */
+    private fun initializeEngineWithSpeculativeFallback(
+        modelPath: String,
+        backend: Backend,
+        visionBackend: Backend?,
+        maxNumTokens: Int,
+        maxNumImages: Int?,
+        trySpeculative: Boolean,
+        onTempEngineCreated: (Engine) -> Unit
+    ): Engine {
+        val config = buildEngineConfig(
+            modelPath = modelPath,
+            backend = backend,
+            visionBackend = visionBackend,
+            maxNumTokens = maxNumTokens,
+            maxNumImages = maxNumImages,
+            enableSpeculativeDecoding = trySpeculative
+        )
+        val eng = Engine(config)
+        onTempEngineCreated(eng)
+        try {
+            eng.initialize()
+            return eng
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            if (!trySpeculative || !isMissingSpeculativeDrafterError(e)) {
+                throw e
+            }
+            android.util.Log.w(
+                "LlmInferenceEngine",
+                "Speculative decoding drafter missing (${e.message}); retrying initialization without speculative decoding."
+            )
+            runCatching { eng.close() }
+            val fallbackConfig = buildEngineConfig(
+                modelPath = modelPath,
+                backend = backend,
+                visionBackend = visionBackend,
+                maxNumTokens = maxNumTokens,
+                maxNumImages = maxNumImages,
+                enableSpeculativeDecoding = false
+            )
+            val fallbackEng = Engine(fallbackConfig)
+            onTempEngineCreated(fallbackEng)
+            fallbackEng.initialize()
+            return fallbackEng
+        }
     }
 
     /**
@@ -857,6 +938,7 @@ class LlmInferenceEngine(private val context: Context) {
             activeBackend = "None"
             detectedMaxContextTokens = 0
             detectedSupportsThinking = false
+            detectedSupportsSpeculativeDecoding = false
             detectedSupportsVision = false
             detectedSupportedBackends = emptySet()
             detectedNpuBrand = NpuBrand.UNKNOWN
@@ -937,6 +1019,15 @@ class LlmInferenceEngine(private val context: Context) {
 
     companion object {
         const val NPU_CACHE_VERSION = "v3.0_litertlm"
+
+        internal fun isMissingSpeculativeDrafterError(error: Throwable): Boolean {
+            val combinedMessage = generateSequence(error) { it.cause }
+                .mapNotNull { it.message }
+                .joinToString(" ")
+            return combinedMessage.contains("tf_lite_mtp_drafter", ignoreCase = true) ||
+                combinedMessage.contains("mtp_drafter", ignoreCase = true) ||
+                combinedMessage.contains("speculative decoding", ignoreCase = true)
+        }
 
         /**
          * Qwen / ChatML Jinja template that handles sequence-based message content
