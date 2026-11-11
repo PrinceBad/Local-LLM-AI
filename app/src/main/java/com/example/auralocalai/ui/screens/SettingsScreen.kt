@@ -425,8 +425,8 @@ fun SettingsScreen(
 
                     val searchModes = listOf(
                         WebSearchMode.OFF to ("Off" to "Never perform web search"),
-                        WebSearchMode.AUTO to ("Auto" to "Detect when real-time information is needed"),
-                        WebSearchMode.ALWAYS to ("Always" to "Search the web for every user prompt")
+                        WebSearchMode.AUTO to ("Auto (1-time)" to "Search once if real-time info is needed, then auto-off"),
+                        WebSearchMode.ALWAYS to ("On (1-time)" to "Search the web for the next prompt, then auto-off")
                     )
 
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -832,7 +832,7 @@ fun SettingsScreen(
                                 Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Entry-level GPU (e.g. Adreno 610) detected. Auto mode safely routes to multithreaded CPU for instant, crash-free performance.",
+                                    text = "Auto mode attempts Vulkan GPU acceleration first and falls back automatically to CPU/NPU if GPU initialization fails.",
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )

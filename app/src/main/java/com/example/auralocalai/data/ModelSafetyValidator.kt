@@ -198,13 +198,19 @@ object ModelSafetyValidator {
         isGpu: Boolean = false,
         isNpu: Boolean = false,
         modelFile: File? = null,
-        contextTurns: Int = 6
+        contextTurns: Int = 6,
+        effectiveContextTokens: Int? = null
     ): Long {
         val modelSizeBytes = estimateModelSizeBytes(modelFile, preset)
         val clampedTurns = contextTurns.coerceIn(4, 16)
-        val contextTokens = preset?.let {
+        val declaredContextTokens = preset?.let {
             Regex("(\\d+(?:,\\d+)?)").find(it.contextLength)?.value?.replace(",", "")?.toIntOrNull()
         } ?: 4096
+        val contextTokens = if (effectiveContextTokens != null && effectiveContextTokens > 0) {
+            minOf(declaredContextTokens, effectiveContextTokens)
+        } else {
+            declaredContextTokens
+        }
         val contextScaleFactor = (contextTokens.toDouble() / 4096.0).coerceIn(1.0, 4.0)
         val kvCacheOverhead = (clampedTurns * (75L * 1024L * 1024L) * contextScaleFactor).toLong()
         val scratchActivationOverhead = 350L * 1024L * 1024L
@@ -242,13 +248,28 @@ object ModelSafetyValidator {
      *    allocate weights, KV cache, and runtime buffers without triggering kernel LMK aborts.
      *    Evaluated for BOTH GPU (accounting for Vulkan unified buffer staging) and CPU.
      */
+    internal fun readProcMemAvailableBytes(): Long? {
+        return try {
+            val memInfoFile = File("/proc/meminfo")
+            if (!memInfoFile.exists() || !memInfoFile.canRead()) return null
+            memInfoFile.useLines { lines ->
+                val line = lines.firstOrNull { it.startsWith("MemAvailable:") } ?: return@useLines null
+                val kb = Regex("(\\d+)").find(line)?.groupValues?.get(1)?.toLongOrNull() ?: return@useLines null
+                kb * 1024L
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     fun verifyDeviceRamForInference(
         context: Context,
         preset: ModelPreset? = null,
         isGpu: Boolean = false,
         isNpu: Boolean = false,
         modelFile: File? = null,
-        contextTurns: Int = 6
+        contextTurns: Int = 6,
+        effectiveContextTokens: Int? = null
     ): Result<Unit> {
         val actManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             ?: return Result.success(Unit)
@@ -301,15 +322,17 @@ object ModelSafetyValidator {
             isGpu = isGpu,
             isNpu = isNpu,
             modelFile = modelFile,
-            contextTurns = contextTurns
+            contextTurns = contextTurns,
+            effectiveContextTokens = effectiveContextTokens
         )
 
         // Hard minimum required: at least working buffer headroom (KV cache + activations, minimum 350 MB)
         // rather than blocking if available RAM doesn't include the entire mmap model file
         val criticalBufferBytes = maxOf(350L * 1024L * 1024L, minRequiredAvailBytes - estimateModelSizeBytes(modelFile, preset))
+        val effectiveAvailMem = maxOf(memInfo.availMem, readProcMemAvailableBytes() ?: 0L)
 
-        if (memInfo.availMem < criticalBufferBytes) {
-            val availGb = "%.2f".format(memInfo.availMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
+        if (effectiveAvailMem < criticalBufferBytes) {
+            val availGb = "%.2f".format(effectiveAvailMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val neededGb = "%.2f".format(criticalBufferBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val backendLabel = if (isGpu) "GPU" else "CPU"
             return Result.failure(
@@ -317,8 +340,8 @@ object ModelSafetyValidator {
                     "Low memory condition: Only ${availGb} GiB free RAM available right now. Initializing ${preset?.name ?: "model"} on $backendLabel requires at least ${neededGb} GiB working memory. Please close background apps and try again."
                 )
             )
-        } else if (memInfo.availMem < minRequiredAvailBytes) {
-            val availGb = "%.2f".format(memInfo.availMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
+        } else if (effectiveAvailMem < minRequiredAvailBytes) {
+            val availGb = "%.2f".format(effectiveAvailMem.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val neededGb = "%.2f".format(minRequiredAvailBytes.toDouble() / (1024.0 * 1024.0 * 1024.0))
             val backendLabel = if (isGpu) "GPU" else "CPU"
             Log.w(

@@ -217,5 +217,20 @@ class ModelSafetyValidatorTest {
         // 5. NPU unified staging buffer overhead delta (780 MiB):
         val availNpuAt6Turns = ModelSafetyValidator.getMinRequiredAvailableRamBytes(preset6Gb, isGpu = false, isNpu = true, contextTurns = 6)
         assertEquals("NPU overhead must match GPU unified buffer overhead of exactly 780 MiB", 780L * 1024L * 1024L, availNpuAt6Turns - availAt6Turns)
+
+        // 6. Capped effectiveContextTokens avoids inflating 8K model RAM demand when turns cap KV cache to <= 4096:
+        val preset8k = ModelPreset(
+            id = "test-8k",
+            name = "Test 8K Model",
+            description = "",
+            sizeBytes = 3_600_000_000L,
+            minRamGb = 8,
+            downloadUrl = "",
+            fileName = "test8k.litertlm",
+            contextLength = "8,192 tokens"
+        )
+        val unCappedGpuReq = ModelSafetyValidator.getMinRequiredAvailableRamBytes(preset8k, isGpu = true, contextTurns = 6)
+        val cappedGpuReq = ModelSafetyValidator.getMinRequiredAvailableRamBytes(preset8k, isGpu = true, contextTurns = 6, effectiveContextTokens = 2304)
+        assertTrue("Effective token cap must reduce GPU KV cache requirement vs un-capped 8192 tokens", cappedGpuReq < unCappedGpuReq)
     }
 }

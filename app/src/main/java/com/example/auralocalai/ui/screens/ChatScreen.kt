@@ -556,14 +556,35 @@ fun ChatScreen(
                                         .clip(CircleShape)
                                         .background(statusColor)
                                 )
-                                Text(
-                                    text = subtitleText,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = statusColor,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
+                                if (uiState.modelState is ModelState.Loaded && uiState.activeBackend.isNotBlank() && uiState.activeBackend != "None") {
+                                    val baseLabel = subtitleText.substringBeforeLast(" • ")
+                                    Text(
+                                        text = baseLabel,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = statusColor,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Text(
+                                        text = "• ${uiState.activeBackend}",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = statusColor,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                } else {
+                                    Text(
+                                        text = subtitleText,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = statusColor,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -711,32 +732,42 @@ fun ChatScreen(
                     ) { index, message ->
                         val isLastMessage = index == uiState.messages.lastIndex
                         val isActivelyStreaming = isLastMessage && uiState.isGenerating && !message.isUser
-                        val isReasoning = !message.isUser && run {
-                            if (message.modelId != null) {
-                                when {
-                                    // 1. Catalog non-reasoning models (e.g. Qwen Coder, Gemma): never treat as reasoning
-                                    ModelPreset.isKnownNonReasoningModel(message.modelId) -> false
-                                    // 2. Catalog reasoning models (DeepSeek-R1, QwQ): always treat as reasoning
-                                    ModelPreset.isReasoningModel(message.modelId) -> true
-                                    // 3. Custom imported models: gate strictly on confirmed thinking tags
-                                    else -> hasThinkingTags(message.content)
-                                }
-                            } else {
-                                // 4. Legacy history: decouple from active model; gate strictly on confirmed thinking tags
-                                hasThinkingTags(message.content)
-                            }
-                        }
+                        val liveStreamingText = streamingText
+                        val currentBodyText = if (isActivelyStreaming && liveStreamingText != null) liveStreamingText else message.content
+                        val hasNoVisibleContentYet = isActivelyStreaming &&
+                            currentBodyText.isBlank() &&
+                            message.imageUri == null &&
+                            message.videoUri == null &&
+                            message.fileUri == null
 
-                        ChatBubble(
-                            message = message,
-                            isActivelyGenerating = isActivelyStreaming,
-                            isReasoningModel = isReasoning,
-                            streamingText = if (isActivelyStreaming) streamingText else null
-                        )
+                        if (!hasNoVisibleContentYet) {
+                            val isReasoning = !message.isUser && run {
+                                if (message.modelId != null) {
+                                    when {
+                                        // 1. Catalog non-reasoning models (e.g. Qwen Coder, Gemma): never treat as reasoning
+                                        ModelPreset.isKnownNonReasoningModel(message.modelId) -> false
+                                        // 2. Catalog reasoning models (DeepSeek-R1, QwQ): always treat as reasoning
+                                        ModelPreset.isReasoningModel(message.modelId) -> true
+                                        // 3. Custom imported models: gate strictly on confirmed thinking tags
+                                        else -> hasThinkingTags(currentBodyText)
+                                    }
+                                } else {
+                                    // 4. Legacy history: decouple from active model; gate strictly on confirmed thinking tags
+                                    hasThinkingTags(currentBodyText)
+                                }
+                            }
+
+                            ChatBubble(
+                                message = message,
+                                isActivelyGenerating = isActivelyStreaming,
+                                isReasoningModel = isReasoning,
+                                streamingText = if (isActivelyStreaming) streamingText else null
+                            )
+                        }
                     }
 
                     val lastMessage = uiState.messages.lastOrNull()
-                    val isWaitingForFirstToken = uiState.isGenerating && (lastMessage == null || lastMessage.isUser || (lastMessage.content.isEmpty() && streamingText.isNullOrEmpty()))
+                    val isWaitingForFirstToken = uiState.isGenerating && (lastMessage == null || lastMessage.isUser || (lastMessage.content.isBlank() && streamingText.isNullOrBlank()))
                     if (isWaitingForFirstToken) {
                         item {
                             TypingIndicatorBubble()
@@ -962,7 +993,8 @@ fun ChatScreen(
                             searchDisclosureAcknowledged = uiState.searchDisclosureAcknowledged,
                             onToggleListening = { toggleListening() },
                             onOpenSearchDisclosure = { showSearchDisclosureDialog = true },
-                            onSetSearchOverride = { viewModel.setChatSearchOverride(it) },
+                            onEnableSearchOneShot = { viewModel.setChatSearchOverride(WebSearchMode.ALWAYS) },
+                            onDisableSearch = { viewModel.disableWebSearch() },
                             onOpenAttachmentSheet = { showAttachmentSheet = true },
                             onSendMessage = { prompt -> viewModel.sendMessage(prompt) },
                             onStopGeneration = { viewModel.stopGeneration() }
@@ -1153,7 +1185,7 @@ fun ChatScreen(
                     Button(
                         onClick = {
                             viewModel.acknowledgeSearchDisclosure()
-                            viewModel.setChatSearchOverride(WebSearchMode.AUTO)
+                            viewModel.setChatSearchOverride(WebSearchMode.ALWAYS)
                             showSearchDisclosureDialog = false
                         }
                     ) {
@@ -1350,7 +1382,7 @@ fun ChatBubble(
             ),
             modifier = Modifier.widthIn(max = 340.dp)
         ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
                 if (message.imageUri != null) {
                     AsyncImage(
                         model = message.imageUri,
@@ -1465,7 +1497,8 @@ fun ChatBubble(
                 }
 
                 // Parse think blocks only for AI assistant messages from reasoning models
-                val textToDisplay = if (isActivelyGenerating && streamingText != null) streamingText else message.content
+                val rawTextToDisplay = if (isActivelyGenerating && streamingText != null) streamingText else message.content
+                val textToDisplay = rawTextToDisplay.trimStart('\r', '\n', ' ', '\t').trimEnd()
                 val parsed = if (!message.isUser && (isReasoningModel || hasThinkingTags(textToDisplay))) {
                     remember(textToDisplay) { parseThinkBlocks(textToDisplay) }
                 } else {
@@ -1542,14 +1575,57 @@ fun ChatBubble(
                     }
                 }
 
+                val isCompactSingleLineCopy = !message.isUser &&
+                    !isActivelyGenerating &&
+                    parsed.thinkContent.isNullOrBlank() &&
+                    message.searchSources.isNullOrEmpty() &&
+                    message.imageUri == null &&
+                    message.videoUri == null &&
+                    message.fileUri == null &&
+                    message.ocrText == null &&
+                    parsed.mainContent.isNotBlank() &&
+                    !parsed.mainContent.contains('\n') &&
+                    parsed.mainContent.length <= 42
+
                 if (parsed.mainContent.isNotEmpty()) {
-                    Text(
-                        text = parsed.mainContent,
-                        color = textColor,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
+                    if (isCompactSingleLineCopy) {
+                        @Suppress("DEPRECATION")
+                        val clipboardManager = LocalClipboardManager.current
+                        val bubbleContext = LocalContext.current
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = parsed.mainContent,
+                                color = textColor,
+                                fontSize = 15.sp,
+                                lineHeight = 21.sp,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(parsed.mainContent))
+                                    Toast.makeText(bubbleContext, "Copied response to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy message",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = parsed.mainContent,
+                            color = textColor,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp
+                        )
+                    }
                 }
 
                 // Grounded search sources card
@@ -1680,32 +1756,27 @@ fun ChatBubble(
                         }
                     }
                 }
-                
-                if (!message.isUser && !isActivelyGenerating && parsed.mainContent.isNotBlank()) {
+
+                if (!isCompactSingleLineCopy && !message.isUser && !isActivelyGenerating && parsed.mainContent.isNotBlank()) {
                     @Suppress("DEPRECATION")
                     val clipboardManager = LocalClipboardManager.current
                     val bubbleContext = LocalContext.current
-                    Row(
+                    IconButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(parsed.mainContent))
+                            Toast.makeText(bubbleContext, "Copied response to clipboard", Toast.LENGTH_SHORT).show()
+                        },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
+                            .align(Alignment.End)
+                            .padding(top = 4.dp)
+                            .size(22.dp)
                     ) {
-                        IconButton(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(parsed.mainContent))
-                                Toast.makeText(bubbleContext, "Copied response to clipboard", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "Copy message",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy message",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            modifier = Modifier.size(14.dp)
+                        )
                     }
                 }
 
@@ -2174,45 +2245,50 @@ private fun ChatInputBar(
     searchDisclosureAcknowledged: Boolean,
     onToggleListening: () -> Unit,
     onOpenSearchDisclosure: () -> Unit,
-    onSetSearchOverride: (WebSearchMode) -> Unit,
+    onEnableSearchOneShot: () -> Unit,
+    onDisableSearch: () -> Unit,
     onOpenAttachmentSheet: () -> Unit,
     onSendMessage: (String) -> Unit,
     onStopGeneration: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val text = inputState.value
+    val isSearchActive = effectiveSearchMode != WebSearchMode.OFF
     val searchIconTint = when (effectiveSearchMode) {
         WebSearchMode.OFF -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
         WebSearchMode.AUTO -> MaterialTheme.colorScheme.primary
         WebSearchMode.ALWAYS -> Color(0xFF16A34A)
     }
     val searchModeLabel = when (effectiveSearchMode) {
-        WebSearchMode.OFF -> "Web Search: Off"
-        WebSearchMode.AUTO -> "Web Search: Auto"
-        WebSearchMode.ALWAYS -> "Web Search: Always"
+        WebSearchMode.OFF -> "Web Search: Off (tap to enable once)"
+        WebSearchMode.AUTO -> "Web Search: Auto (tap to turn off)"
+        WebSearchMode.ALWAYS -> "Web Search: On for next message (tap to turn off)"
     }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.fillMaxWidth()
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             IconButton(
                 onClick = onOpenAttachmentSheet,
                 enabled = !hasAttachment && !isGenerating,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Attach Content",
                     tint = if (!hasAttachment) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             ) {
                 if (isListening) {
                     PulsingListeningIndicator()
@@ -2220,50 +2296,47 @@ private fun ChatInputBar(
                 IconButton(
                     onClick = onToggleListening,
                     enabled = !isGenerating,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = if (isListening) "Stop Listening" else "Voice Input",
                         tint = if (isListening) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
 
             IconButton(
                 onClick = {
-                    val nextMode = when (effectiveSearchMode) {
-                        WebSearchMode.OFF -> WebSearchMode.AUTO
-                        WebSearchMode.AUTO -> WebSearchMode.ALWAYS
-                        WebSearchMode.ALWAYS -> WebSearchMode.OFF
-                    }
-                    if (nextMode != WebSearchMode.OFF && !searchDisclosureAcknowledged) {
+                    if (isSearchActive) {
+                        onDisableSearch()
+                    } else if (!searchDisclosureAcknowledged) {
                         onOpenSearchDisclosure()
                     } else {
-                        onSetSearchOverride(nextMode)
+                        onEnableSearchOneShot()
                     }
                 },
                 enabled = !isGenerating,
-                modifier = Modifier.size(36.dp)
+                modifier = Modifier.size(32.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.TravelExplore,
                     contentDescription = searchModeLabel,
                     tint = searchIconTint,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(6.dp))
 
         BasicTextField(
             value = text,
             onValueChange = { inputState.value = it },
             modifier = Modifier
                 .weight(1f)
-                .padding(vertical = 8.dp, horizontal = 4.dp),
+                .padding(vertical = 6.dp, horizontal = 2.dp),
             textStyle = LocalTextStyle.current.copy(
                 color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 15.sp
@@ -2275,7 +2348,10 @@ private fun ChatInputBar(
                         Text(
                             text = "Ask Local LLM/AI...",
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            fontSize = 15.sp
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                     innerTextField()

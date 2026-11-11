@@ -858,6 +858,12 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(chatSearchOverride = mode) }
     }
 
+    fun disableWebSearch() {
+        val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("web_search_mode", WebSearchMode.OFF.name).apply()
+        _uiState.update { it.copy(chatSearchOverride = null, webSearchMode = WebSearchMode.OFF) }
+    }
+
     fun acknowledgeSearchDisclosure() {
         val prefs = getApplication<Application>().getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("web_search_disclosure_acknowledged", true).apply()
@@ -988,7 +994,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
 
                 // GPU timeout
                 lower.contains("timed out") && lower.contains("gpu") ->
-                    "GPU shader compilation timed out after 25s. Switch to CPU backend in Settings for this model."
+                    "GPU shader compilation timed out after 45s. Switch to CPU backend in Settings for this model."
 
                 // Missing MTP speculative drafter subgraph
                 lower.contains("tf_lite_mtp_drafter") || lower.contains("mtp_drafter") ->
@@ -1532,6 +1538,8 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (!queryToSearch.isNullOrBlank()) {
+                // Disable web search immediately after triggering once so subsequent prompts stay offline unless re-enabled.
+                disableWebSearch()
                 _uiState.update { it.copy(isSearching = true, activeSearchQuery = queryToSearch, webSearchError = null) }
                 try {
                     val apiKey = tokenStorage.getSecret(SecretStorage.KEY_SEARCH_API_KEY)
@@ -1706,7 +1714,7 @@ class LlmViewModel(application: Application) : AndroidViewModel(application) {
                 } else null
 
                 _streamingMessageText.value = null
-                val finalContent = accumulatedBuilder.toString()
+                val finalContent = accumulatedBuilder.toString().trim()
                 _uiState.update { state ->
                     val updatedMessages = ArrayList(state.messages)
                     if (updatedMessages.isNotEmpty()) {

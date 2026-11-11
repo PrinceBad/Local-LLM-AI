@@ -74,11 +74,19 @@ class LlmInferenceEngine(private val context: Context) {
             // Ignore cache migration failures
         }
 
-        // Initialize GPU failure cache
+        // Initialize & migrate versioned GPU failure cache (sweeps stale entries from earlier builds)
         try {
             val gpuPrefs = context.getSharedPreferences("gpu_backend_cache", Context.MODE_PRIVATE)
+            val outdatedGpuKeys = gpuPrefs.all.keys.filter { !it.endsWith(":$GPU_CACHE_VERSION") }
+            if (outdatedGpuKeys.isNotEmpty()) {
+                val editor = gpuPrefs.edit()
+                for (key in outdatedGpuKeys) {
+                    editor.remove(key)
+                }
+                editor.apply()
+            }
             gpuPrefs.all.forEach { (key, value) ->
-                if (value == true) {
+                if (value == true && key.endsWith(":$GPU_CACHE_VERSION")) {
                     failedGpuModelPaths.add(key)
                 }
             }
@@ -277,31 +285,20 @@ class LlmInferenceEngine(private val context: Context) {
             // ============================================================
             // STEP 1: Attempt GPU initialization (Vulkan) - Primary acceleration in AUTO mode
             // ============================================================
-            // In AUTO mode, check persistent GPU failure cache and entry-level GPU hardware fast path.
-            // On SoCs with entry-level GPUs (e.g. Adreno 610 on Snapdragon 680/685 / Redmi Note 12),
-            // Vulkan compute shaders are known to hang or crash; routing directly to CPU (XNNPACK) in AUTO mode
-            // provides instant 1-2s loading, rock-solid stability, and 30-40 t/s throughput.
-            val gpuCacheKey = "$modelPath:${modelFile.lastModified()}"
+            // Always prioritize loading on GPU first in AUTO mode; fall back seamlessly to NPU/CPU only if GPU fails or times out.
+            val gpuCacheKey = "$modelPath:${modelFile.lastModified()}:$GPU_CACHE_VERSION"
             val isCachedGpuFailure = failedGpuModelPaths.contains(gpuCacheKey) ||
                 context.getSharedPreferences("gpu_backend_cache", Context.MODE_PRIVATE).getBoolean(gpuCacheKey, false)
-            val isEntryGpuSoc = SocDetector.shouldDefaultToCpu(context)
-            val modelSupportsCpu = if (detectedSupportedBackends.isNotEmpty()) {
-                detectedSupportedBackends.contains(BackendType.CPU)
-            } else {
-                preset?.backendRestriction != LlmBackendRestriction.GPU_ONLY &&
-                    preset?.backendRestriction != LlmBackendRestriction.NPU_ONLY
-            }
-            val shouldBypassGpuInAuto = (preferredBackend == "AUTO") && (isCachedGpuFailure || (isEntryGpuSoc && modelSupportsCpu))
 
-            if (preferredBackend == "AUTO" && shouldBypassGpuInAuto) {
+            if (preferredBackend == "AUTO" && isCachedGpuFailure) {
                 android.util.Log.i(
                     "LlmInferenceEngine",
-                    "Auto mode: Bypassing GPU execution (cachedFailure=$isCachedGpuFailure, entryGpuSoc=$isEntryGpuSoc, modelSupportsCpu=$modelSupportsCpu) -> routing directly to stable CPU/NPU."
+                    "Auto mode: Bypassing GPU execution due to cached GPU failure for ${modelFile.name} -> falling back to CPU/NPU."
                 )
             }
 
-            // In AUTO mode, always attempt GPU first unless bypassed; fallback to CPU only if GPU fails or times out.
-            val attemptGpu = (preferredBackend == "GPU_ONLY" || (preferredBackend == "AUTO" && !shouldBypassGpuInAuto)) &&
+            // In AUTO mode, always attempt GPU first (unless this exact model failed GPU in current cache version).
+            val attemptGpu = (preferredBackend == "GPU_ONLY" || (preferredBackend == "AUTO" && !isCachedGpuFailure)) &&
                 (restriction == LlmBackendRestriction.ANY || restriction == LlmBackendRestriction.GPU_ONLY)
             if (attemptGpu) {
                 // Pre-flight GPU RAM guard: accounts for weight staging & Android Vulkan buffer duplication (LiteRT-LM #3507)
@@ -311,7 +308,8 @@ class LlmInferenceEngine(private val context: Context) {
                     isGpu = true,
                     isNpu = false,
                     modelFile = modelFile,
-                    contextTurns = contextTurns
+                    contextTurns = contextTurns,
+                    effectiveContextTokens = effectiveMaxTokens
                 )
                 if (gpuRamCheck.isFailure) {
                     val ramError = gpuRamCheck.exceptionOrNull() ?: Exception("Insufficient available RAM for GPU initialization")
@@ -321,11 +319,11 @@ class LlmInferenceEngine(private val context: Context) {
                     }
                     gpuError = ramError
                 } else {
-                    onStageUpdate?.invoke("Compiling GPU shaders\u2026")
+                    onStageUpdate?.invoke("Initializing Vulkan GPU\u2026")
                     var tempGpuEngine: Engine? = null
                     try {
                         if (preferredBackend == "AUTO") {
-                            val initOk = kotlinx.coroutines.withTimeoutOrNull(25_000L) {
+                            val initOk = kotlinx.coroutines.withTimeoutOrNull(45_000L) {
                                 initializeEngineWithSpeculativeFallback(
                                     modelPath = modelPath,
                                     backend = Backend.GPU(),
@@ -337,7 +335,7 @@ class LlmInferenceEngine(private val context: Context) {
                                 )
                             }
                             if (initOk == null) {
-                                throw RuntimeException("GPU shader compilation timed out after 25s")
+                                throw RuntimeException("GPU shader compilation timed out after 45s")
                             }
                             kotlinx.coroutines.currentCoroutineContext().ensureActive()
                             engine = initOk
@@ -537,7 +535,7 @@ class LlmInferenceEngine(private val context: Context) {
                     val stageMsg = if (gpuError != null) "GPU unavailable \u2014 checking device RAM for CPU fallback\u2026" else "Checking device RAM for CPU execution\u2026"
                     onStageUpdate?.invoke(stageMsg)
                     // Check RAM size before committing to CPU execution to prevent native OOM crashes
-                    val ramCheck = verifyDeviceRamForCpu(preset, modelFile, contextTurns)
+                    val ramCheck = verifyDeviceRamForCpu(preset, modelFile, contextTurns, effectiveMaxTokens)
                     if (ramCheck.isFailure) {
                         val ramError = ramCheck.exceptionOrNull() ?: Exception("RAM check failed for CPU execution")
                         return@withContext Result.failure(ramError)
@@ -672,8 +670,15 @@ class LlmInferenceEngine(private val context: Context) {
      * Checks if the device has at least 8 GB of total RAM.
      * Throws an explicit exception if RAM is insufficient, avoiding a silent native OS OOM kill.
      */
-    private fun verifyDeviceRamForCpu(preset: ModelPreset?, modelFile: File? = null, contextTurns: Int = 6): Result<Unit> {
-        return ModelSafetyValidator.verifyDeviceRamForInference(context, preset, isGpu = false, modelFile = modelFile, contextTurns = contextTurns)
+    private fun verifyDeviceRamForCpu(preset: ModelPreset?, modelFile: File? = null, contextTurns: Int = 6, effectiveMaxTokens: Int? = null): Result<Unit> {
+        return ModelSafetyValidator.verifyDeviceRamForInference(
+            context = context,
+            preset = preset,
+            isGpu = false,
+            modelFile = modelFile,
+            contextTurns = contextTurns,
+            effectiveContextTokens = effectiveMaxTokens
+        )
     }
 
 
@@ -1019,6 +1024,7 @@ class LlmInferenceEngine(private val context: Context) {
 
     companion object {
         const val NPU_CACHE_VERSION = "v3.0_litertlm"
+        const val GPU_CACHE_VERSION = "v3.1_gpu_first"
 
         internal fun isMissingSpeculativeDrafterError(error: Throwable): Boolean {
             val combinedMessage = generateSequence(error) { it.cause }

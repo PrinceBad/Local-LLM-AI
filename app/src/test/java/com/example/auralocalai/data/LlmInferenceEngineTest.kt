@@ -61,4 +61,10 @@ class LlmInferenceEngineTest {
         val unrelated = RuntimeException("Vulkan VK_ERROR_DEVICE_LOST during shader pipeline creation")
         assertFalse(LlmInferenceEngine.isMissingSpeculativeDrafterError(unrelated))
     }
+
+    @Test
+    fun testGpuCacheVersion_isExplicitlyStamped() {
+        assertTrue("GPU cache version must be stamped for migration", LlmInferenceEngine.GPU_CACHE_VERSION.isNotBlank())
+        assertTrue("GPU cache version must reflect GPU-first migration", LlmInferenceEngine.GPU_CACHE_VERSION.contains("v3.1"))
+    }
 }
